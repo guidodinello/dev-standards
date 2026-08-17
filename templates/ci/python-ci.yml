@@ -1,0 +1,63 @@
+# Baseline CI for a small/single-package Python repo — mirrors the pre-commit
+# baseline (templates/pre-commit/python.yaml) as a required gate, since
+# pre-commit itself only runs locally and CI is the only place a required
+# check can actually enforce it. Deliberately just lint + test: no
+# typecheck (add a "Typecheck Python" job with pyright/mypy once the repo
+# has real type-annotation coverage), no path filtering (add
+# dorny/paths-filter once this repo is a monorepo with independent
+# subprojects — not needed for a single package).
+#
+# Adopt: cp to .github/workflows/ci.yml, fill in the two <FIXME> spots,
+# then add "Lint Python" and "Tests (Python)" as required_status_checks
+# contexts for this repo in github-standard.json.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # <FIXME> uv sync --dev assumes a [dependency-groups] dev group in
+      # pyproject.toml. If this repo instead uses [project.optional-dependencies],
+      # swap to: uv pip install -e ".[dev]"
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: ruff format check
+        run: uv run ruff format --check .
+
+      - name: ruff lint
+        run: uv run ruff check .
+
+  test-python:
+    name: Tests (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # <FIXME> adjust the test path/markers to this repo's layout
+      # (e.g. `-m "not integration"` if it separates unit from integration).
+      - name: Run tests
+        run: uv run pytest

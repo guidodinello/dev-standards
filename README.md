@@ -19,4 +19,15 @@ idempotent audit/apply script. Full rationale: [docs/github-standard.md](docs/gi
 
 ## CI / pre-commit templates
 
-*(planned — not yet added)*
+```bash
+cp templates/pre-commit/python.yaml <repo>/.pre-commit-config.yaml
+cp templates/ci/python-ci.yml       <repo>/.github/workflows/ci.yml
+```
+
+Baseline for a Python repo with no CI yet (or a thin one) — lint (ruff) + test
+(pytest), mirrored between local pre-commit and a required CI gate. Deliberately
+narrow: no typecheck, no path filtering — see the comments at the top of each
+template for when to add them. Copy and genericize, don't symlink — CI workflows
+are repo-specific enough (dependency install command, test markers) that a template
+needs a few `<FIXME>` spots filled in per repo, unlike the guideline files a sibling
+tool (`push-guidelines.sh`, in `claude-dotfiles`) keeps byte-identical across repos.
