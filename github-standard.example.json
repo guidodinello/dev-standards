@@ -1,0 +1,145 @@
+{
+  "_comment": "Declarative GitHub repo-config baseline. Consumed by github-standard.py \u2014 see that file's header and docs/github-standard.md for the full rationale. Every override below carries a comment naming why; don't 'fix' a pinned exception back to the default without reading the linked doc first.",
+  "org": "<your-github-username-or-org>",
+  "defaults": {
+    "settings": {
+      "delete_branch_on_merge": true,
+      "allow_auto_merge": true,
+      "allow_squash_merge": true,
+      "allow_merge_commit": false,
+      "allow_rebase_merge": false
+    },
+    "security": {
+      "vulnerability_alerts": true,
+      "automated_security_fixes": true,
+      "secret_scanning": "public-only"
+    },
+    "ruleset": {
+      "target": "branch",
+      "enforcement": "active",
+      "bypass_actors": [],
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        },
+        {
+          "type": "copilot_code_review",
+          "parameters": {
+            "review_on_push": false,
+            "review_draft_pull_requests": false
+          }
+        },
+        {
+          "type": "required_signatures"
+        },
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 0,
+            "dismiss_stale_reviews_on_push": false,
+            "required_reviewers": [],
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": true,
+            "allowed_merge_methods": [
+              "squash"
+            ]
+          }
+        },
+        {
+          "type": "code_quality",
+          "parameters": {
+            "severity": "errors"
+          }
+        }
+      ]
+    }
+  },
+  "_profiles_comment": "A profile describes the shape of a branch's review posture \u2014 not the repo's settings (those stay a repo-level settings_overrides, since GitHub settings aren't branch-scoped even when the policy driving them is). A repo/branch resolves to a profile explicitly ('profile': '<name>') or defaults to 'baseline'. Profile fields layer on top of defaults.ruleset the same way repo/branch overrides do: rule_overrides deep-merge into the matching default rule, extra_rules append, bypass_actors replace wholesale if set.",
+  "profiles": {
+    "hobby": {
+      "_comment": "Scratch/personal repos pushed to directly. No ruleset at all \u2014 just the settings+security baseline.",
+      "tier": "settings"
+    },
+    "baseline": {
+      "_comment": "The canonical shape: squash-only, 0 required approvals, required signatures, zero bypass. Used as-is by most repos; also the implicit default for any branch that doesn't name a profile.",
+      "tier": "ruleset"
+    },
+    "oss": {
+      "_comment": "Published, publicly-contributable projects (CODEOWNERS committed) \u2014 needs real review of external contributions, which baseline's 0-approval posture doesn't provide. bypass_actors lets the owner still merge their own PRs past a review requirement aimed at everyone else \u2014 look up the numeric RepositoryRole id for \"admin\"/\"maintain\" via GET /repos/{o}/{r}/rulesets/rule-suites or the ruleset UI.",
+      "tier": "ruleset",
+      "bypass_actors": [
+        {
+          "actor_id": "<repository-role-id>",
+          "actor_type": "RepositoryRole",
+          "bypass_mode": "always"
+        }
+      ],
+      "rule_overrides": {
+        "pull_request": {
+          "required_approving_review_count": 1,
+          "require_code_owner_review": true,
+          "dismiss_stale_reviews_on_push": true
+        }
+      }
+    },
+    "flagship": {
+      "_comment": "Multi-stage release branches on a repo with a real deploy pipeline (e.g. integration-branch -> main). A release promotion is a merge commit, never squash, because squash breaks ancestry between two long-lived branches: the merge-base never advances, so every later release PR shows a phantom diff of already-deployed code. Apply only to the release/main branch of a two-stage flow, not the integration branch feeding it \u2014 that one stays 'baseline' (squash).",
+      "tier": "ruleset",
+      "rule_overrides": {
+        "pull_request": {
+          "allowed_merge_methods": [
+            "merge"
+          ]
+        }
+      },
+      "extra_rules": [
+        {
+          "type": "required_deployments",
+          "parameters": {
+            "required_deployment_environments": []
+          }
+        }
+      ]
+    }
+  },
+  "repos": {
+    "my-scratch-repo": {
+      "profile": "hobby"
+    },
+    "my-normal-repo": {
+      "profile": "baseline"
+    },
+    "my-repo-with-ci": {
+      "profile": "baseline",
+      "branches": {
+        "main": {
+          "extra_rules": [
+            {
+              "type": "required_status_checks",
+              "parameters": {
+                "strict_required_status_checks_policy": false,
+                "do_not_enforce_on_create": false,
+                "required_status_checks": [
+                  {
+                    "context": "CI"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "my-oss-project": {
+      "branches": {
+        "main": {
+          "profile": "oss"
+        }
+      }
+    }
+  }
+}

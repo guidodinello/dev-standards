@@ -1,0 +1,7 @@
+# Your real per-repo config — names actual repos/orgs/exceptions, not public info
+# even though the tool that reads it is. Copy github-standard.example.json to get
+# started: cp github-standard.example.json github-standard.json
+github-standard.json
+
+__pycache__/
+*.pyc
