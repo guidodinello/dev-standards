@@ -32,6 +32,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Default GITHUB_TOKEN scope for every job below — neither lints nor tests
+# writes anything (no comments, no pushes, no packages). Least privilege.
+permissions:
+  contents: read
+
 jobs:
   lint-python:
     name: Lint Python
