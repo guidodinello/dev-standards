@@ -10,6 +10,19 @@
 # Adopt: cp to .github/workflows/ci.yml, fill in the two <FIXME> spots,
 # then add "Lint Python" and "Tests (Python)" as required_status_checks
 # contexts for this repo in github-standard.json.
+#
+# Before the first push, check the target repo actually has what this
+# workflow assumes — two gaps found rolling this out the first time:
+#   - `ruff`/`pytest` must be in the project's own dev dependency group.
+#     A repo that only runs ruff through pre-commit's isolated hook env
+#     doesn't have it on `uv sync --dev`'s PATH; CI fails with
+#     "Failed to spawn: `ruff`" even though pre-commit works fine locally.
+#   - ruff >=0.13 formats fenced Python code blocks inside Markdown by
+#     default. `ruff format --check .` at a repo root with a docs/ folder
+#     will try to reformat illustrative code snippets in prose. Add
+#     `extend-exclude = ["docs"]` (or wherever non-source markdown lives)
+#     under `[tool.ruff]` in pyproject.toml — fixes it for local
+#     pre-commit and editors too, not just this workflow.
 name: CI
 
 on:
