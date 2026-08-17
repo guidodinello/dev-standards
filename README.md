@@ -31,3 +31,18 @@ template for when to add them. Copy and genericize, don't symlink — CI workflo
 are repo-specific enough (dependency install command, test markers) that a template
 needs a few `<FIXME>` spots filled in per repo, unlike the guideline files a sibling
 tool (`push-guidelines.sh`, in `claude-dotfiles`) keeps byte-identical across repos.
+
+## Dependabot
+
+```bash
+cp templates/dependabot/python.yml     <repo>/.github/dependabot.yml
+cp templates/dependabot/automerge.yml  <repo>/.github/workflows/dependabot-automerge.yml
+```
+
+Version-update PRs (pip + pre-commit hook revs + GitHub Actions pins, weekly),
+auto-merged when patch/minor and left for manual review on major. Distinct from the
+vulnerability-alert/automated-security-fix settings `github-standard.py` already
+turns on via the API — those are security-only; this is routine currency. Needs
+`allow_auto_merge: true` at the repo level, already in the baseline settings.
+`automerge.yml` is fully generic, copy verbatim; `python.yml` needs its `directory`
+adjusted for anything but a single-package repo with `pyproject.toml` at the root.
