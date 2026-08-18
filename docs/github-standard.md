@@ -134,6 +134,44 @@ run. Preflight checks `gh auth status` and that the active token carries the `re
 scope before writing anything, so an auth problem surfaces once instead of as N
 misleading per-repo 403s.
 
+## Dependabot
+
+`templates/dependabot/` has two files: `python.yml` (version updates — pip, pre-commit
+hook revs, GitHub Actions pins, weekly) and `automerge.yml` (patch/minor auto-merge,
+major stays manual). These are distinct from the vulnerability-alert/automated-security-fix
+*settings* this script already manages via the API — those are security-only; the
+templates are routine currency.
+
+**Auto-merge needs a GitHub App, not just `GITHUB_TOKEN`.** A merge performed with
+`GITHUB_TOKEN` triggers no downstream workflow runs at all — GitHub suppresses that to
+prevent a workflow from triggering itself in an infinite loop. On a repo with a deploy
+pipeline gated on push-to-`main`, that means an auto-merged Dependabot bump silently
+never deploys: nothing fails, nothing reports a problem, the change just sits merged
+but not shipped until an unrelated human push happens to carry it out. Caught this in
+production — several merged bumps sat undeployed for days to weeks before it was
+noticed.
+
+One-time setup (the App can be shared across every repo that uses this template):
+
+1. https://github.com/settings/apps/new — name it anything, homepage can be anything
+   valid, **uncheck "Active" under Webhook** (not needed)
+2. Repository permissions: **Contents: Read and write**, **Pull requests: Read and
+   write** (merging a PR is categorized under the Contents permission, not Pull
+   requests, despite what you'd expect)
+3. Create the App, then generate a private key (downloads a `.pem`) and note the App ID
+4. Install the App — **"Only select repositories"**, not "All repositories". This App
+   can merge PRs; scope its blast radius to the repos that actually use it, and add
+   more explicitly later rather than granting it every repo (including ones created
+   after today) up front.
+5. Per repo: **Settings → Secrets and variables → Dependabot** (not Actions — a
+   Dependabot-triggered workflow can't read Actions secrets) → add `AUTOMERGE_APP_ID`
+   and `AUTOMERGE_APP_PRIVATE_KEY` (the full `.pem` contents)
+
+Without the App configured, `automerge.yml` degrades gracefully — it detects the
+missing secret, reports "not configured" in the job summary, and leaves the PR for a
+manual merge (which does trigger a deploy). It doesn't fail loudly, so a repo adopting
+this template before the App is set up isn't broken, just not yet automated.
+
 ## Adding a new repo
 
 Add an entry under `"repos"` in your `github-standard.json` — `{"profile": "hobby"}`
