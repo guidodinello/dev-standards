@@ -174,8 +174,17 @@ this template before the App is set up isn't broken, just not yet automated.
 
 ## Adding a new repo
 
-Add an entry under `"repos"` in your `github-standard.json` — `{"profile": "hobby"}`
-for a scratch repo, `{"profile": "baseline"}` once it's meant to take PRs (or `"oss"`
-/ `"flagship"` if it matches one of those shapes), plus a `branches` block with
-`extra_rules` for `required_status_checks` once it has real CI. Then
+For a Python repo taking the standard CI/pre-commit/Dependabot templates, use
+`./init.py <repo> --apply` (see the README) — it detects the repo's Python
+version, dev-dependency style, and test presence, renders all four templates,
+adds a `{"profile": "baseline"}` entry to `github-standard.json`, and delegates
+to `github-standard.py --apply` in one step. Then, once CI has gone green at
+least once, `./init.py <repo> --checks` prints the `required_status_checks`
+snippet to merge in by hand (see § Required checks above — never auto-derived).
+
+For a scratch repo (`hobby`, no ruleset) or one that doesn't fit the Python
+templates (an `"oss"`/`"flagship"` shape, or a different language entirely),
+add the entry by hand: `{"profile": "hobby"}` or `{"profile": "baseline"}` (or
+`"oss"`/`"flagship"`), plus a `branches` block with `extra_rules` for
+`required_status_checks` once it has real CI. Then
 `./github-standard.py <repo> --apply`.
