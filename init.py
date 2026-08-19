@@ -73,8 +73,17 @@ def log_err(msg: str) -> None:
 # github-standard.py, which owns that logic) ────────────────────────────────
 
 
-def gh_get(path: str) -> dict | list | None:
-    proc = subprocess.run(["gh", "api", path], capture_output=True, text=True, check=False)
+def _run_gh(args: list[str]) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(["gh", *args], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        log_err("`gh` CLI not found on PATH. Install it and authenticate before running init.py.")
+        sys.exit(1)
+
+
+def gh_get(path: str, *, paginate: bool = False) -> dict | list | None:
+    cmd = ["api", path] + (["--paginate"] if paginate else [])
+    proc = _run_gh(cmd)
     if proc.returncode != 0:
         return None
     if not proc.stdout.strip():
@@ -83,7 +92,10 @@ def gh_get(path: str) -> dict | list | None:
 
 
 def preflight_gh_auth() -> None:
-    proc = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, check=False)
+    """Run before anything else that shells out to gh — get_default_branch
+    used to run first, so a bad/missing auth surfaced as a mid-detection
+    warning instead of failing here, up front, before any writes."""
+    proc = _run_gh(["auth", "status"])
     if proc.returncode != 0:
         log_err("gh auth status failed — not logged in. Aborting before any writes.")
         sys.exit(1)
@@ -106,12 +118,27 @@ def load_pyproject(repo_root: Path) -> dict:
 
 
 def detect_python_version(pyproject: dict) -> str:
+    """PEP 508 specifier clauses are unordered (`<4.0,>=3.11` is as valid as
+    `>=3.11,<4.0`), so scanning the raw string for the first digit.digit
+    pattern can pick up the upper-bound clause instead of the lower bound.
+    Parse clause-by-clause and take the lower bound (>=, ==, or ~=) instead."""
     requires = pyproject.get("project", {}).get("requires-python", "")
-    m = re.search(r"(\d+)\.(\d+)", requires)
-    if not m:
-        log_err(f"Couldn't parse a python version out of requires-python={requires!r}. Pass --python.")
-        sys.exit(1)
-    return f"{m.group(1)}.{m.group(2)}"
+    for clause in requires.split(","):
+        clause = clause.strip()
+        m = re.match(r"(>=|==|~=)\s*(\d+)\.(\d+)", clause)
+        if m:
+            return f"{m.group(2)}.{m.group(3)}"
+    log_err(
+        f"Couldn't find a >=/==/~= lower-bound clause in requires-python={requires!r}. Pass --python."
+    )
+    sys.exit(1)
+
+
+def _dep_name(spec: str) -> str:
+    """Bare package name from a PEP 508 dependency spec, e.g.
+    'pytest-cov>=4.0' -> 'pytest-cov'. Needed so a substring check like
+    "pytest" in dep doesn't false-match "pytest-cov"/"pytest-asyncio"/etc."""
+    return re.split(r"[<>=!~\[\s;]", spec, maxsplit=1)[0].strip().lower()
 
 
 def _dev_deps(pyproject: dict, style: str) -> list[str]:
@@ -144,8 +171,12 @@ def install_cmd_for(style: str, locked: bool) -> str:
 
 
 def detect_tests(repo_root: Path, pyproject: dict, dev_style: str) -> bool:
+    """Checked against dev_style's own dep list, not both styles: dev_style
+    is exactly what install_cmd_for() will install, so pytest declared only
+    under the *other* style genuinely won't be on PATH — excluding the test
+    job in that case is correct, not a detection miss."""
     has_dir = (repo_root / "tests").is_dir()
-    has_pytest = any("pytest" in dep for dep in _dev_deps(pyproject, dev_style))
+    has_pytest = any(_dep_name(dep) == "pytest" for dep in _dev_deps(pyproject, dev_style))
     return has_dir and has_pytest
 
 
@@ -165,11 +196,21 @@ def get_default_branch(org: str, repo: str) -> str:
 # content in this script (single source of truth stays templates/) ─────────
 
 
+def _must_replace(text: str, old: str, new: str) -> str:
+    """Like str.replace, but fails loudly if `old` isn't present. templates/
+    is edited independently of this script — if a FIXME's wording or a
+    version literal there ever changes, a silent no-op here would ship a
+    stale <FIXME>/version literal with exit code 0."""
+    if old not in text:
+        raise RuntimeError(f"Expected template text not found — templates/ may have changed:\n{old!r}")
+    return text.replace(old, new)
+
+
 def render_pre_commit(version: str) -> str:
     text = (TEMPLATES / "pre-commit" / "python.yaml").read_text()
     version_nodot = version.replace(".", "")
-    text = text.replace("python3.13", f"python{version}")
-    text = text.replace("--py313-plus", f"--py{version_nodot}-plus")
+    text = _must_replace(text, "python3.13", f"python{version}")
+    text = _must_replace(text, "--py313-plus", f"--py{version_nodot}-plus")
     return text
 
 
@@ -197,20 +238,30 @@ def render_ci(*, install_cmd: str, branch: str, include_tests: bool) -> str:
     text = (TEMPLATES / "ci" / "python-ci.yml").read_text()
 
     resolved_install = f"      - name: Install dependencies\n        run: {install_cmd}"
-    text = text.replace(_FIXME_INSTALL_BLOCK, resolved_install)
+    text = _must_replace(text, _FIXME_INSTALL_BLOCK, resolved_install)
     # The test job's own (uncommented) install line, only reached if that
     # job survives below — resolve it too so both jobs use the same command.
-    text = text.replace("        run: uv sync --dev", f"        run: {install_cmd}")
-    text = text.replace(
+    text = _must_replace(text, "        run: uv sync --dev", f"        run: {install_cmd}")
+    text = _must_replace(
+        text,
         _FIXME_TEST_BLOCK,
         "      - name: Run tests\n        run: uv run pytest",
     )
-    text = text.replace("branches: [main]", f"branches: [{branch}]")
+    text = _must_replace(text, "branches: [main]", f"branches: [{branch}]")
 
     if not include_tests:
-        before, _, _ = text.partition("\n  test-python:")
+        anchor = "\n  test-python:"
+        if anchor not in text:
+            raise RuntimeError(f"Expected {anchor!r} job marker not found — templates/ may have changed")
+        before, _, _ = text.partition(anchor)
         text = before.rstrip("\n") + "\n"
-        text = text.replace("jobs:\n", f"jobs:\n{_NO_TESTS_COMMENT}")
+        text = _must_replace(
+            text,
+            '# then add "Lint Python" and "Tests (Python)" as required_status_checks\n',
+            '# then add "Lint Python" as a required_status_checks context (no test job\n'
+            "# below yet — see the note under jobs:)\n",
+        )
+        text = _must_replace(text, "jobs:\n", f"jobs:\n{_NO_TESTS_COMMENT}")
 
     return text
 
@@ -239,7 +290,7 @@ def write_rendered(path: Path, content: str, *, apply: bool, force: bool) -> boo
     return True
 
 
-def _align_entry_line(repo: str, profile: str, column: int = 40) -> str:
+def _align_entry_line(repo: str, profile: str, column: int = 38) -> str:
     key = f'    "{repo}":'
     pad = " " * max(1, column - len(key))
     return f'{key}{pad}{{ "profile": "{profile}" }},\n'
@@ -276,15 +327,27 @@ def preflight_ruleset(org: str, repo: str, branch: str) -> None:
     """A ruleset whose name doesn't match the branch key would make
     github-standard.py create a *second* ruleset instead of updating the
     existing one (no upsert endpoint — see docs/github-standard.md § No
-    upsert). Refuse up front rather than let that happen silently."""
+    upsert). But that's only a real risk if the mismatched ruleset actually
+    targets our branch under the wrong name — a repo with correctly-named
+    `main` and `development` rulesets isn't a conflict for either one, and
+    docs/github-standard.md § No upsert explicitly blesses unmanaged
+    rulesets targeting other branches as fine to leave alone."""
     existing = gh_get(f"repos/{org}/{repo}/rulesets")
     if not isinstance(existing, list):
         return  # repo has no rulesets API access yet (e.g. doesn't exist), nothing to check
+    if any(rs.get("name") == branch for rs in existing):
+        return  # github-standard.py will PUT-update this one — no duplicate risk
+
+    target_ref = f"refs/heads/{branch}"
     for rs in existing:
-        if rs.get("name") != branch:
+        detail = gh_get(f"repos/{org}/{repo}/rulesets/{rs.get('id')}")
+        if not isinstance(detail, dict):
+            continue
+        includes = detail.get("conditions", {}).get("ref_name", {}).get("include", [])
+        if target_ref in includes:
             log_err(
                 f"{repo} already has a ruleset named '{rs.get('name')}' (id {rs.get('id')}) "
-                f"that doesn't match branch '{branch}'. Rename it first — "
+                f"that targets {target_ref} under the wrong name. Rename it first — "
                 "otherwise github-standard.py will create a second ruleset:\n"
                 f'    echo \'{{"name":"{branch}"}}\' | gh api -X PUT '
                 f"repos/{org}/{repo}/rulesets/{rs.get('id')} --input -"
@@ -326,7 +389,7 @@ def run_checks_mode(org: str, repo: str, branch: str) -> int:
         log_err(f"'{repo}' is not in {CONFIG_PATH.name} yet — run ./init.py {repo} --apply first.")
         return 1
 
-    check_runs = gh_get(f"repos/{org}/{repo}/commits/{branch}/check-runs")
+    check_runs = gh_get(f"repos/{org}/{repo}/commits/{branch}/check-runs", paginate=True)
     if not isinstance(check_runs, dict) or "check_runs" not in check_runs:
         log_err(f"Couldn't read check-runs for {org}/{repo}@{branch} — has CI ever run on this branch?")
         return 1
@@ -406,11 +469,11 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
         log_info(f"Rendered to {out_root} — no JSON entry, no delegate, no API writes.")
         return 0
 
+    preflight_gh_auth()
+
     config = json.loads(CONFIG_PATH.read_text())
     org: str = config["org"]
     branch = args.branch or get_default_branch(org, args.repo)
-
-    preflight_gh_auth()
     preflight_ruleset(org, args.repo, branch)
 
     out_root = repo_root
