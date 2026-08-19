@@ -3,6 +3,34 @@
 Repo governance and engineering standards, applied consistently across every repo I
 own — as opposed to hand-configuring each one and letting them drift.
 
+## Bootstrapping a new repo
+
+```bash
+./init.py my-repo --apply                  # ~/projects/my-repo, autodetected
+./init.py my-repo --path ~/other/dir --apply
+```
+
+One command instead of the manual sequence below: detects Python version,
+dev-dependency style, and test presence from the target repo's own
+`pyproject.toml`/layout; renders the four templates with those values filled
+in; adds a `{"profile": "baseline"}` entry to `github-standard.json`; then
+delegates to `github-standard.py --apply`. Dry run by default; every detected
+value has an override flag (`--python`, `--dev-style`, `--tests`/`--no-tests`,
+`--locked`, `--branch`). Refuses to overwrite a file that already exists
+(`--force` to override) and never touches an already-registered repo's JSON
+entry.
+
+Required status checks are deliberately **not** part of this — a check
+context has to be read off a real CI run and hand-confirmed (see
+`docs/github-standard.md` § Required checks). Run `./init.py my-repo --checks`
+once CI has gone green at least once; it prints the snippet to paste rather
+than writing it, since the JSON entry is by then a nested structure this
+script won't touch automatically.
+
+The manual `cp` recipes below still work and are what `init.py` runs under
+the hood — reach for them if you're adopting only one piece, or on a non-Python
+repo `init.py` doesn't cover (see `shell-utils` for that shape).
+
 ## GitHub repo config
 
 ```bash
