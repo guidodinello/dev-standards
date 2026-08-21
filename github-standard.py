@@ -99,16 +99,19 @@ def preflight() -> None:
     if proc.returncode != 0:
         log_err("gh auth status failed — not logged in. Aborting before any writes.")
         sys.exit(1)
-    scopes_proc = subprocess.run(
-        ["gh", "api", "-i", "/"], capture_output=True, text=True
-    )
+    scopes_proc = subprocess.run(["gh", "api", "-i", "/"], capture_output=True, text=True)
     scopes_line = next(
-        (l for l in scopes_proc.stdout.splitlines() if l.lower().startswith("x-oauth-scopes")),
+        (
+            line
+            for line in scopes_proc.stdout.splitlines()
+            if line.lower().startswith("x-oauth-scopes")
+        ),
         "",
     )
     if "repo" not in scopes_line:
         log_err(
-            f"Active gh token is missing the 'repo' scope ({scopes_line.strip() or 'no scope header seen'}). "
+            f"Active gh token is missing the 'repo' scope "
+            f"({scopes_line.strip() or 'no scope header seen'}). "
             "Aborting before any writes — this would otherwise surface as 20 misleading 403s."
         )
         sys.exit(1)
@@ -162,9 +165,7 @@ def build_ruleset(defaults_ruleset: dict, branch: str, branch_cfg: dict) -> dict
     overrides = branch_cfg.get("rule_overrides", {})
     for rule in rules:
         if rule["type"] in overrides:
-            rule["parameters"] = deep_merge(
-                rule.get("parameters", {}), overrides[rule["type"]]
-            )
+            rule["parameters"] = deep_merge(rule.get("parameters", {}), overrides[rule["type"]])
     rules += copy.deepcopy(branch_cfg.get("extra_rules", []))
 
     return {
@@ -194,9 +195,7 @@ def normalize(ruleset: dict) -> dict:
                 params["required_status_checks"], key=lambda c: c["context"]
             )
         if isinstance(params, dict) and "required_reviewers" in params:
-            params["required_reviewers"] = sorted(
-                params["required_reviewers"], key=json.dumps
-            )
+            params["required_reviewers"] = sorted(params["required_reviewers"], key=json.dumps)
     r["bypass_actors"] = sorted(r.get("bypass_actors", []), key=sort_key)
     r["conditions"]["ref_name"]["include"] = sorted(r["conditions"]["ref_name"]["include"])
     r["conditions"]["ref_name"]["exclude"] = sorted(r["conditions"]["ref_name"]["exclude"])
@@ -261,26 +260,25 @@ def sync_security(org: str, repo: str, defaults: dict, apply: bool) -> bool:
         if apply:
             gh_api(f"repos/{org}/{repo}/automated-security-fixes", method="PUT")
 
-    if sec["secret_scanning"] == "public-only":
-        if is_public:
-            sa = repo_obj.get("security_and_analysis") or {}
-            ss_status = (sa.get("secret_scanning") or {}).get("status")
-            pp_status = (sa.get("secret_scanning_push_protection") or {}).get("status")
-            want = {}
-            if ss_status != "enabled":
-                want["secret_scanning"] = {"status": "enabled"}
-            if pp_status != "enabled":
-                want["secret_scanning_push_protection"] = {"status": "enabled"}
-            if want:
-                changed = True
-                log_warn(f"{repo} security — secret scanning drift: {list(want)}")
-                if apply:
-                    gh_api(
-                        f"repos/{org}/{repo}",
-                        method="PATCH",
-                        body={"security_and_analysis": want},
-                    )
-        # private repos: needs GHAS, skip entirely — not an error, not drift.
+    # private repos: needs GHAS, skip entirely — not an error, not drift.
+    if sec["secret_scanning"] == "public-only" and is_public:
+        sa = repo_obj.get("security_and_analysis") or {}
+        ss_status = (sa.get("secret_scanning") or {}).get("status")
+        pp_status = (sa.get("secret_scanning_push_protection") or {}).get("status")
+        want = {}
+        if ss_status != "enabled":
+            want["secret_scanning"] = {"status": "enabled"}
+        if pp_status != "enabled":
+            want["secret_scanning_push_protection"] = {"status": "enabled"}
+        if want:
+            changed = True
+            log_warn(f"{repo} security — secret scanning drift: {list(want)}")
+            if apply:
+                gh_api(
+                    f"repos/{org}/{repo}",
+                    method="PATCH",
+                    body={"security_and_analysis": want},
+                )
 
     if not changed:
         log_info(f"{repo} security — up to date")
@@ -289,7 +287,9 @@ def sync_security(org: str, repo: str, defaults: dict, apply: bool) -> bool:
     return changed
 
 
-def sync_ruleset(org: str, repo: str, defaults: dict, profiles: dict, repo_cfg: dict, apply: bool) -> bool:
+def sync_ruleset(
+    org: str, repo: str, defaults: dict, profiles: dict, repo_cfg: dict, apply: bool
+) -> bool:
     changed = False
     branches = repo_cfg.get("branches") or {"main": {}}
     existing = gh_api_list(f"repos/{org}/{repo}/rulesets")
@@ -330,8 +330,9 @@ def sync_ruleset(org: str, repo: str, defaults: dict, profiles: dict, repo_cfg: 
     for name in existing_by_name:
         if name not in managed:
             log_warn(
-                f"{repo} — unmanaged ruleset named '{name}' exists (id {existing_by_name[name]['id']}). "
-                f"Rename it to match a branch key ({sorted(managed)}) to bring it under management, or leave it if intentional."
+                f"{repo} — unmanaged ruleset named '{name}' exists "
+                f"(id {existing_by_name[name]['id']}). Rename it to match a branch key "
+                f"({sorted(managed)}) to bring it under management, or leave it if intentional."
             )
 
     return changed
@@ -341,9 +342,13 @@ def sync_ruleset(org: str, repo: str, defaults: dict, profiles: dict, repo_cfg: 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("repo", nargs="?", help="Only audit/apply this one repo.")
-    parser.add_argument("--apply", action="store_true", help="Actually write. Without it, dry run only.")
+    parser.add_argument(
+        "--apply", action="store_true", help="Actually write. Without it, dry run only."
+    )
     args = parser.parse_args()
 
     config_path = Path(__file__).parent / "github-standard.json"
@@ -364,7 +369,9 @@ def main() -> int:
     if args.apply:
         log_info(f"Applying baseline to {len(repos)} repo(s).")
     else:
-        log_info(f"Dry run over {len(repos)} repo(s) — nothing will be written. Re-run with --apply.")
+        log_info(
+            f"Dry run over {len(repos)} repo(s) — nothing will be written. Re-run with --apply."
+        )
 
     any_changed = False
     any_failed = False

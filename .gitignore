@@ -5,3 +5,6 @@ github-standard.json
 
 __pycache__/
 *.pyc
+.venv/
+.ruff_cache/
+.pytest_cache/

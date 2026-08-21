@@ -3,6 +3,14 @@
 Repo governance and engineering standards, applied consistently across every repo I
 own — as opposed to hand-configuring each one and letting them drift.
 
+This repo self-hosts its own baseline (`pyproject.toml`, `.pre-commit-config.yaml`,
+`.github/workflows/ci.yml`, `.github/dependabot.yml`) rendered from its own
+`templates/` via `./init.py dev-standards --render-to`, the same as any other repo
+onboarded with this tool. Repos already bootstrapped from an earlier version of
+`templates/` (e.g. `herdr-routines`) are unaffected — `init.py` only renders at
+bootstrap time and never re-applies itself to a repo later, so picking up template
+changes there is a manual re-run, not automatic.
+
 ## Bootstrapping a new repo
 
 ```bash

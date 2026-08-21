@@ -1,0 +1,25 @@
+[project]
+name = "dev-standards"
+version = "0.1.0"
+description = "Bootstrap and audit the org's CI/pre-commit/Dependabot/GitHub-config baseline."
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.13",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+# ruff >=0.13 formats fenced Python code blocks inside Markdown by default —
+# docs/ has illustrative snippets that aren't meant to be reformatted as source.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
