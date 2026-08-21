@@ -42,9 +42,8 @@ import json
 import re
 import subprocess
 import sys
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 GREEN = "\033[1;32m"
 YELLOW = "\033[1;33m"
@@ -129,7 +128,8 @@ def detect_python_version(pyproject: dict) -> str:
         if m:
             return f"{m.group(2)}.{m.group(3)}"
     log_err(
-        f"Couldn't find a >=/==/~= lower-bound clause in requires-python={requires!r}. Pass --python."
+        f"Couldn't find a >=/==/~= lower-bound clause in requires-python={requires!r}. "
+        "Pass --python."
     )
     sys.exit(1)
 
@@ -202,7 +202,9 @@ def _must_replace(text: str, old: str, new: str) -> str:
     version literal there ever changes, a silent no-op here would ship a
     stale <FIXME>/version literal with exit code 0."""
     if old not in text:
-        raise RuntimeError(f"Expected template text not found — templates/ may have changed:\n{old!r}")
+        raise RuntimeError(
+            f"Expected template text not found — templates/ may have changed:\n{old!r}"
+        )
     return text.replace(old, new)
 
 
@@ -215,7 +217,7 @@ def render_pre_commit(version: str) -> str:
 
 
 _FIXME_INSTALL_BLOCK = (
-    '      # <FIXME> uv sync --dev assumes a [dependency-groups] dev group in\n'
+    "      # <FIXME> uv sync --dev assumes a [dependency-groups] dev group in\n"
     "      # pyproject.toml. If this repo instead uses [project.optional-dependencies],\n"
     '      # swap to: uv pip install -e ".[dev]"\n'
     "      - name: Install dependencies\n"
@@ -252,7 +254,9 @@ def render_ci(*, install_cmd: str, branch: str, include_tests: bool) -> str:
     if not include_tests:
         anchor = "\n  test-python:"
         if anchor not in text:
-            raise RuntimeError(f"Expected {anchor!r} job marker not found — templates/ may have changed")
+            raise RuntimeError(
+                f"Expected {anchor!r} job marker not found — templates/ may have changed"
+            )
         before, _, _ = text.partition(anchor)
         text = before.rstrip("\n") + "\n"
         text = _must_replace(
@@ -309,7 +313,9 @@ def splice_repos_entry(repo: str, profile: str, *, apply: bool) -> None:
     anchor = '"repos": {'
     idx = raw.find(anchor)
     if idx == -1:
-        log_err(f'Could not find the literal `{anchor}` anchor in {CONFIG_PATH.name} — not touching it.')
+        log_err(
+            f"Could not find the literal `{anchor}` anchor in {CONFIG_PATH.name} — not touching it."
+        )
         sys.exit(1)
     insert_at = raw.index("\n", idx) + 1
     new_line = _align_entry_line(repo, profile)
@@ -370,7 +376,10 @@ def print_checklist(org: str, repo: str, *, docs_present: bool) -> None:
             "wait for manual merge. See docs/github-standard.md § Dependabot to set up the App."
         )
     log_warn("  - Confirm ruff and pytest are real dev dependencies, not just pre-commit hook envs")
-    log_warn("    (otherwise CI fails with \"Failed to spawn: `ruff`\" even though pre-commit works locally).")
+    log_warn(
+        '    (otherwise CI fails with "Failed to spawn: `ruff`" even though '
+        "pre-commit works locally)."
+    )
     if docs_present:
         log_warn(
             '  - docs/ exists: add extend-exclude = ["docs"] under [tool.ruff] in pyproject.toml '
@@ -391,11 +400,15 @@ def run_checks_mode(org: str, repo: str, branch: str) -> int:
 
     check_runs = gh_get(f"repos/{org}/{repo}/commits/{branch}/check-runs", paginate=True)
     if not isinstance(check_runs, dict) or "check_runs" not in check_runs:
-        log_err(f"Couldn't read check-runs for {org}/{repo}@{branch} — has CI ever run on this branch?")
+        log_err(
+            f"Couldn't read check-runs for {org}/{repo}@{branch} — has CI ever run on this branch?"
+        )
         return 1
     contexts = sorted({c["name"] for c in check_runs["check_runs"]})
     if not contexts:
-        log_err(f"No check runs found on {org}/{repo}@{branch} yet — push once and let CI finish first.")
+        log_err(
+            f"No check runs found on {org}/{repo}@{branch} yet — push once and let CI finish first."
+        )
         return 1
 
     log_info(f"Contexts seen on {org}/{repo}@{branch}: {contexts}")
@@ -443,12 +456,17 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
     # explicit per-repo style choice — default to the template's own default
     # (unlocked) unless asked for.
     locked = bool(args.locked)
-    include_tests = detect_tests(repo_root, pyproject, dev_style) if args.tests is None else args.tests
+    include_tests = (
+        detect_tests(repo_root, pyproject, dev_style) if args.tests is None else args.tests
+    )
     docs_present = detect_docs(repo_root)
     install_cmd = install_cmd_for(dev_style, locked)
 
+    dev_style_label = (
+        "dependency-groups" if dev_style == "groups" else "project.optional-dependencies"
+    )
     log_info(
-        f"Detected: python {version}, dev-deps via [{'dependency-groups' if dev_style == 'groups' else 'project.optional-dependencies'}], "
+        f"Detected: python {version}, dev-deps via [{dev_style_label}], "
         f"{'locked' if locked else 'unlocked'}, tests {'present' if include_tests else 'absent'}, "
         f"docs/ {'present' if docs_present else 'absent'}"
     )
@@ -492,31 +510,68 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
 
     if not args.apply:
         log_info(
-            f"Dry run — re-run with --apply to write, then: ./github-standard.py {args.repo} --apply"
+            f"Dry run — re-run with --apply to write, then: "
+            f"./github-standard.py {args.repo} --apply"
         )
         print_checklist(org, args.repo, docs_present=docs_present)
         return 0
 
     log_info(f"Delegating to github-standard.py for {args.repo} (settings/security/ruleset)...")
-    proc = subprocess.run(["./github-standard.py", args.repo, "--apply"], cwd=REPO_ROOT, check=False)
+    proc = subprocess.run(
+        ["./github-standard.py", args.repo, "--apply"], cwd=REPO_ROOT, check=False
+    )
     print_checklist(org, args.repo, docs_present=docs_present)
     return proc.returncode
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("repo", help="GitHub repo name (may differ from the local directory name).")
-    parser.add_argument("--path", type=Path, default=None, help="Local repo path (default: ~/projects/<repo>).")
-    parser.add_argument("--profile", default="baseline", help="Profile to write into github-standard.json.")
-    parser.add_argument("--apply", action="store_true", help="Actually write. Without it, dry run only.")
+    parser.add_argument(
+        "--path", type=Path, default=None, help="Local repo path (default: ~/projects/<repo>)."
+    )
+    parser.add_argument(
+        "--profile", default="baseline", help="Profile to write into github-standard.json."
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="Actually write. Without it, dry run only."
+    )
     parser.add_argument("--force", action="store_true", help="Overwrite files that already exist.")
     parser.add_argument("--branch", default=None, help="Override the detected default branch.")
-    parser.add_argument("--python", default=None, help="Override the detected Python version, e.g. 3.13.")
-    parser.add_argument("--dev-style", choices=["groups", "optional"], default=None, help="Override dev-dependency style detection.")
-    parser.add_argument("--locked", action=argparse.BooleanOptionalAction, default=None, help="Add --locked to uv sync (default: off, matching the template).")
-    parser.add_argument("--tests", action=argparse.BooleanOptionalAction, default=None, help="Override test-job-inclusion detection.")
-    parser.add_argument("--checks", action="store_true", help="Phase 2: read real CI contexts, print the required_status_checks snippet.")
-    parser.add_argument("--render-to", type=Path, default=None, help="Render templates into DIR only — no JSON entry, no delegate, no API writes.")
+    parser.add_argument(
+        "--python", default=None, help="Override the detected Python version, e.g. 3.13."
+    )
+    parser.add_argument(
+        "--dev-style",
+        choices=["groups", "optional"],
+        default=None,
+        help="Override dev-dependency style detection.",
+    )
+    parser.add_argument(
+        "--locked",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Add --locked to uv sync (default: off, matching the template).",
+    )
+    parser.add_argument(
+        "--tests",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override test-job-inclusion detection.",
+    )
+    parser.add_argument(
+        "--checks",
+        action="store_true",
+        help="Phase 2: read real CI contexts, print the required_status_checks snippet.",
+    )
+    parser.add_argument(
+        "--render-to",
+        type=Path,
+        default=None,
+        help="Render templates into DIR only — no JSON entry, no delegate, no API writes.",
+    )
     args = parser.parse_args()
 
     if args.checks:
