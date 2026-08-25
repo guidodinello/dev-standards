@@ -1,3 +1,5 @@
+import json
+
 from conftest import REPO_ROOT, import_module_from_path
 
 gh = import_module_from_path("github_standard", REPO_ROOT / "github-standard.py")
@@ -95,3 +97,57 @@ def test_normalize_is_order_insensitive():
         ],
     }
     assert gh.normalize(ruleset_a) == gh.normalize(ruleset_b)
+
+
+def _ruleset(pr_params: dict) -> dict:
+    return {
+        "name": "main",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+        "rules": [{"type": "pull_request", "parameters": pr_params}],
+    }
+
+
+def test_ruleset_diff_names_a_parameter_github_added():
+    """The phantom-drift signature: GitHub returns a pull_request parameter the config
+    never declared, so the audit can never converge. The differ must name the exact path
+    rather than leaving 'drift detected' to be bisected by hand."""
+    declared = {"required_approving_review_count": 0}
+    intended = gh.normalize(_ruleset(declared))
+    current = gh.normalize(
+        _ruleset({**declared, "require_extra_approval_for_unattributed_changes": True})
+    )
+
+    diff = gh.ruleset_diff(intended, current)
+
+    assert len(diff) == 1
+    assert "require_extra_approval_for_unattributed_changes" in diff[0]
+    assert "only on GitHub" in diff[0]
+
+
+def test_ruleset_diff_empty_when_identical():
+    ruleset = gh.normalize(_ruleset({"required_approving_review_count": 0}))
+    assert gh.ruleset_diff(ruleset, ruleset) == []
+
+
+def test_ruleset_diff_reports_changed_scalar():
+    intended = gh.normalize(_ruleset({"required_approving_review_count": 0}))
+    current = gh.normalize(_ruleset({"required_approving_review_count": 1}))
+
+    diff = gh.ruleset_diff(intended, current)
+
+    assert len(diff) == 1
+    assert "required_approving_review_count" in diff[0]
+    assert "config=0" in diff[0] and "GitHub=1" in diff[0]
+
+
+def test_example_config_declares_every_baseline_pull_request_parameter():
+    """Regression guard for the phantom: the example config is what every real config is
+    copied from, so an undeclared parameter there propagates the never-converging audit
+    to each new repo."""
+    example = json.loads((REPO_ROOT / "github-standard.example.json").read_text())
+    rules = example["defaults"]["ruleset"]["rules"]
+    pr_params = next(r for r in rules if r["type"] == "pull_request")["parameters"]
+    assert "require_extra_approval_for_unattributed_changes" in pr_params
