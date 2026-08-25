@@ -178,6 +178,44 @@ def build_ruleset(defaults_ruleset: dict, branch: str, branch_cfg: dict) -> dict
     }
 
 
+def ruleset_diff(intended: dict, current: dict) -> list[str]:
+    """Dotted paths where two normalized rulesets differ, intended vs. current.
+
+    Purely diagnostic: `normalize` already kills ordering noise, so anything left is
+    real — but "drift detected" alone doesn't say what, and the usual cause is GitHub
+    adding a rule parameter the config never declared (it returns the new key with a
+    default, an undeclared key can never match, and the audit then reports drift
+    forever). Naming the path turns that from a hand-rolled bisect into one line of
+    output. Paths present on only one side are reported as such rather than skipped —
+    that asymmetry *is* the signature of a newly-added parameter."""
+    out: list[str] = []
+
+    def walk(a: object, b: object, path: str) -> None:
+        if type(a) is not type(b):
+            out.append(f"{path}: {type(a).__name__} vs {type(b).__name__}")
+        elif isinstance(a, dict):
+            assert isinstance(b, dict)
+            for k in sorted(set(a) | set(b)):
+                if k not in a:
+                    out.append(f"{path}.{k}: only on GitHub ({b[k]!r})")
+                elif k not in b:
+                    out.append(f"{path}.{k}: only in config ({a[k]!r})")
+                else:
+                    walk(a[k], b[k], f"{path}.{k}")
+        elif isinstance(a, list):
+            assert isinstance(b, list)
+            if len(a) != len(b):
+                out.append(f"{path}: {len(a)} item(s) in config vs {len(b)} on GitHub")
+            else:
+                for i, (x, y) in enumerate(zip(a, b, strict=True)):
+                    walk(x, y, f"{path}[{i}]")
+        elif a != b:
+            out.append(f"{path}: config={a!r} GitHub={b!r}")
+
+    walk(intended, current, "")
+    return out
+
+
 def normalize(ruleset: dict) -> dict:
     """Order-insensitive canonical form, for comparing intended vs. what
     GitHub returns. GitHub returns rules/bypass_actors/checks in its own
@@ -315,7 +353,8 @@ def sync_ruleset(
             continue
 
         changed = True
-        log_warn(f"{repo}/{branch} ruleset — drift detected")
+        detail = "; ".join(ruleset_diff(intended_norm, current_norm)) or "unknown"
+        log_warn(f"{repo}/{branch} ruleset — drift detected: {detail}")
         if apply:
             gh_api(
                 f"repos/{org}/{repo}/rulesets/{existing_by_name[branch]['id']}",
