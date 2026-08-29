@@ -278,6 +278,14 @@ def render_automerge() -> str:
     return (TEMPLATES / "dependabot" / "automerge.yml").read_text()
 
 
+def render_codeowners() -> str:
+    return (TEMPLATES / "github" / "CODEOWNERS").read_text()
+
+
+def render_changelog() -> str:
+    return (TEMPLATES / "github" / "CHANGELOG.md").read_text()
+
+
 # ── writing ──────────────────────────────────────────────────────────────
 
 
@@ -481,6 +489,8 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
             ),
             out_root / ".github" / "dependabot.yml": render_dependabot(),
             out_root / ".github" / "workflows" / "dependabot-automerge.yml": render_automerge(),
+            out_root / ".github" / "CODEOWNERS": render_codeowners(),
+            out_root / "CHANGELOG.md": render_changelog(),
         }
         for path, content in files.items():
             write_rendered(path, content, apply=args.apply, force=args.force)
@@ -502,6 +512,8 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
         ),
         out_root / ".github" / "dependabot.yml": render_dependabot(),
         out_root / ".github" / "workflows" / "dependabot-automerge.yml": render_automerge(),
+        out_root / ".github" / "CODEOWNERS": render_codeowners(),
+        out_root / "CHANGELOG.md": render_changelog(),
     }
     for path, content in files.items():
         write_rendered(path, content, apply=args.apply, force=args.force)
