@@ -136,11 +136,19 @@ misleading per-repo 403s.
 
 ## Dependabot
 
-`templates/dependabot/` has two files: `python.yml` (version updates — pip, pre-commit
-hook revs, GitHub Actions pins, weekly) and `automerge.yml` (patch/minor auto-merge,
-major stays manual). These are distinct from the vulnerability-alert/automated-security-fix
-*settings* this script already manages via the API — those are security-only; the
-templates are routine currency.
+`templates/dependabot/` has three files: `python.yml` (version updates — pip, pre-commit
+hook revs, GitHub Actions pins, weekly), `npm.yml` (version updates for npm/pnpm/yarn
+repos, plus a `security-updates` group so every currently-fixable vulnerability alert
+lands as one PR instead of one per CVE — see the file's own header for why), and
+`automerge.yml` (patch/minor auto-merge, major stays manual; ecosystem-agnostic, works
+as-is for either language template). The version-update groups are distinct from the
+vulnerability-alert/automated-security-fix *settings* this script already manages via
+the API — those settings control whether Dependabot acts at all; the templates control
+how its output is shaped (one bundled PR vs. many) once it does.
+
+**Grouping doesn't unblock a stuck alert.** If a vulnerable package is pinned by a
+transitive dependency that itself hasn't released a fix, Dependabot still can't open a
+PR for it regardless of grouping — that still needs a manual bump of whatever pins it.
 
 **Auto-merge needs a GitHub App, not just `GITHUB_TOKEN`.** A merge performed with
 `GITHUB_TOKEN` triggers no downstream workflow runs at all — GitHub suppresses that to
