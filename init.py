@@ -225,7 +225,7 @@ _FIXME_INSTALL_BLOCK = (
     "      # pyproject.toml. If this repo instead uses [project.optional-dependencies],\n"
     '      # swap to: uv venv && uv pip install -e ".[dev]"\n'
     "      # (uv pip install, unlike uv sync, doesn't create the venv itself —\n"
-    "      # omitting `uv venv` fails in CI with \"No virtual environment found\"\n"
+    '      # omitting `uv venv` fails in CI with "No virtual environment found"\n'
     "      # even though it works locally against a pre-existing .venv/)\n"
     "      - name: Install dependencies\n"
     "        run: uv sync --dev"

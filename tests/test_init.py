@@ -25,7 +25,7 @@ def test_detect_dev_style_prefers_dependency_groups_when_both_present():
 def test_install_cmd_for_groups_vs_optional():
     assert init.install_cmd_for("groups", locked=False) == "uv sync --dev"
     assert init.install_cmd_for("groups", locked=True) == "uv sync --locked --dev"
-    assert init.install_cmd_for("optional", locked=False) == 'uv pip install -e ".[dev]"'
+    assert init.install_cmd_for("optional", locked=False) == 'uv venv && uv pip install -e ".[dev]"'
 
 
 def test_detect_tests_requires_both_dir_and_pytest_dep_under_same_style(tmp_path):
