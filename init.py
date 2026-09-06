@@ -167,7 +167,11 @@ def detect_dev_style(pyproject: dict) -> str:
 def install_cmd_for(style: str, locked: bool) -> str:
     if style == "groups":
         return "uv sync --locked --dev" if locked else "uv sync --dev"
-    return 'uv pip install -e ".[dev]"'
+    # unlike `uv sync`, `uv pip install` doesn't create a venv on its own —
+    # without `uv venv` first, CI fails with "No virtual environment found"
+    # even though the exact same command works locally (a pre-existing
+    # .venv/ hides the gap there).
+    return 'uv venv && uv pip install -e ".[dev]"'
 
 
 def detect_tests(repo_root: Path, pyproject: dict, dev_style: str) -> bool:
@@ -219,7 +223,10 @@ def render_pre_commit(version: str) -> str:
 _FIXME_INSTALL_BLOCK = (
     "      # <FIXME> uv sync --dev assumes a [dependency-groups] dev group in\n"
     "      # pyproject.toml. If this repo instead uses [project.optional-dependencies],\n"
-    '      # swap to: uv pip install -e ".[dev]"\n'
+    '      # swap to: uv venv && uv pip install -e ".[dev]"\n'
+    "      # (uv pip install, unlike uv sync, doesn't create the venv itself —\n"
+    '      # omitting `uv venv` fails in CI with "No virtual environment found"\n'
+    "      # even though it works locally against a pre-existing .venv/)\n"
     "      - name: Install dependencies\n"
     "        run: uv sync --dev"
 )
