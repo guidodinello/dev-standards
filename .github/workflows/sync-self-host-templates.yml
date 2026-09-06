@@ -1,0 +1,72 @@
+# Keeps templates/ in sync when Dependabot bumps a pin in this repo's own
+# checked-in .pre-commit-config.yaml or workflow files. Dependabot's
+# pre-commit/github-actions ecosystems only scan those checked-in files —
+# they don't know templates/ exists, so a bump there never reaches the
+# template it was rendered from, and tests/test_self_host.py goes red on
+# the PR. sync_self_host.py is the fix; this workflow runs it automatically
+# and pushes the result back onto the Dependabot PR branch.
+#
+# Needs write access to push, but a workflow triggered by Dependabot gets a
+# read-only GITHUB_TOKEN with no secrets regardless of the `permissions:`
+# declared here — same restriction dependabot-automerge.yml works around.
+# Reuses that same GitHub App (see docs/github-standard.md § Dependabot for
+# setup) for a real write token. Without it configured, this degrades to a
+# no-op: the PR still goes red and a human propagates the bump by hand, same
+# as before this workflow existed.
+name: Sync self-host templates
+
+on:
+  pull_request:
+    paths:
+      - ".pre-commit-config.yaml"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/dependabot-automerge.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    env:
+      APP_ID: ${{ secrets.AUTOMERGE_APP_ID }}
+    steps:
+      - name: Mint a GitHub App token
+        id: app-token
+        if: env.APP_ID != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ env.APP_ID }}
+          private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
+
+      - name: Checkout PR branch
+        if: steps.app-token.outcome == 'success'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Sync pins into templates/
+        if: steps.app-token.outcome == 'success'
+        run: python3 sync_self_host.py
+
+      - name: Commit and push if templates changed
+        if: steps.app-token.outcome == 'success'
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if git diff --quiet; then
+            echo "no drift — nothing to push"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add templates/
+          git commit -m "fix: sync self-host templates with Dependabot bump (automated)"
+          git push origin "HEAD:refs/heads/$HEAD_REF"
+
+      - name: Report that auto-sync is not configured
+        if: steps.app-token.outcome == 'skipped'
+        run: |
+          echo "::notice title=Self-host template sync not configured::AUTOMERGE_APP_ID is unset, so templates/ won't be auto-synced. If Tests (Python) fails on this PR, run ./sync_self_host.py and push the result by hand."

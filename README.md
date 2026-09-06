@@ -11,6 +11,15 @@ onboarded with this tool. Repos already bootstrapped from an earlier version of
 bootstrap time and never re-applies itself to a repo later, so picking up template
 changes there is a manual re-run, not automatic.
 
+Because Dependabot only scans checked-in files, its version bumps (a
+`pre-commit-hooks` rev, a `checkout@vN` pin) never reach the `templates/` copy
+they were rendered from, which `tests/test_self_host.py` then catches as
+drift. `.github/workflows/sync-self-host-templates.yml` runs `sync_self_host.py`
+on Dependabot's own PRs to propagate the bump automatically (reusing the same
+GitHub App as `automerge.yml`, for the same GITHUB_TOKEN-permissions reason —
+see docs/github-standard.md § Dependabot); without that App configured, run
+`./sync_self_host.py` by hand when that test goes red.
+
 ## Bootstrapping a new repo
 
 ```bash
