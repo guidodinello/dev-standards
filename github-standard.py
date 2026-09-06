@@ -293,9 +293,7 @@ def sync_security(org: str, repo: str, defaults: dict, apply: bool) -> bool:
         capture_output=True,
         text=True,
     )
-    asf_on = asf_proc.returncode == 0 and json.loads(asf_proc.stdout or "{}").get(
-        "enabled", False
-    )
+    asf_on = asf_proc.returncode == 0 and json.loads(asf_proc.stdout or "{}").get("enabled", False)
     if sec["automated_security_fixes"] and not asf_on:
         changed = True
         log_warn(f"{repo} security — automated security fixes disabled, want enabled")
