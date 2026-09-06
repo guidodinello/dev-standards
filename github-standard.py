@@ -285,13 +285,15 @@ def sync_security(org: str, repo: str, defaults: dict, apply: bool) -> bool:
         if apply:
             gh_api(f"repos/{org}/{repo}/vulnerability-alerts", method="PUT")
 
-    asf_on = (
-        subprocess.run(
-            ["gh", "api", f"repos/{org}/{repo}/automated-security-fixes"],
-            capture_output=True,
-        ).returncode
-        == 0
+    # unlike vulnerability-alerts, this endpoint always returns 200 with a JSON
+    # body ({"enabled": bool, "paused": bool}) — never 204/404 — so the on/off
+    # state must come from the body, not the exit code.
+    asf_proc = subprocess.run(
+        ["gh", "api", f"repos/{org}/{repo}/automated-security-fixes"],
+        capture_output=True,
+        text=True,
     )
+    asf_on = asf_proc.returncode == 0 and json.loads(asf_proc.stdout or "{}").get("enabled", False)
     if sec["automated_security_fixes"] and not asf_on:
         changed = True
         log_warn(f"{repo} security — automated security fixes disabled, want enabled")
