@@ -51,7 +51,10 @@ jobs:
 
       # <FIXME> uv sync --dev assumes a [dependency-groups] dev group in
       # pyproject.toml. If this repo instead uses [project.optional-dependencies],
-      # swap to: uv pip install -e ".[dev]"
+      # swap to: uv venv && uv pip install -e ".[dev]"
+      # (uv pip install, unlike uv sync, doesn't create the venv itself —
+      # omitting `uv venv` fails in CI with "No virtual environment found"
+      # even though it works locally against a pre-existing .venv/)
       - name: Install dependencies
         run: uv sync --dev
 
