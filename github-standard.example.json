@@ -141,6 +141,11 @@
           "profile": "oss"
         }
       }
+    },
+    "my-private-repo-on-self-hosted": {
+      "_comment": "ci_runners is optional and unmanaged when absent — this pass never auto-unsets a variable a repo set by hand. Set it on a private repo whose GitHub-hosted minutes run out (see README § CI runners); a public repo has unlimited free minutes and needs no entry here.",
+      "profile": "baseline",
+      "ci_runners": ["self-hosted", "linux", "x64"]
     }
   }
 }

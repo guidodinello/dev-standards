@@ -70,6 +70,17 @@ scanner whose quota exhaustion marks it failed/canceled (rather than skipped) wo
 then block every merge for a reason unrelated to the PR's content. Leave that
 context out of `required_status_checks`.
 
+### CI runners
+
+A repo entry can declare `"ci_runners": [...]` — a list of GitHub Actions runner
+labels — to manage the `CI_RUNNERS` Actions variable that `templates/ci/python-ci.yml`
+reads (`runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}`). See
+README § CI runners for what it's for and the manual `gh variable` equivalent.
+
+Absent means unmanaged, not "unset": a repo with no `ci_runners` key is left alone
+entirely, and this pass never deletes a variable a repo set by hand. There's no
+declarative "unset" value — remove the key and run `gh variable delete` yourself.
+
 ## Profiles
 
 A profile names a branch's review posture. Every branch resolves to one — set

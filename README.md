@@ -77,6 +77,80 @@ are repo-specific enough (dependency install command, test markers) that a templ
 needs a few `<FIXME>` spots filled in per repo, unlike the guideline files a sibling
 tool (`push-guidelines.sh`, in `claude-dotfiles`) keeps byte-identical across repos.
 
+## CI runners
+
+`templates/ci/python-ci.yml` reads the `CI_RUNNERS` repo variable to pick where its
+jobs run:
+
+```yaml
+runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+```
+
+Unset means GitHub-hosted `ubuntu-latest` — the default, no action needed. This exists
+because a **private** repo's free GitHub-hosted minutes run out, and every job then
+refuses to start with "recent account payments have failed or your spending limit
+needs to be increased" (hit on `truco`). A public repo has unlimited free minutes and
+needs none of this.
+
+Point CI at the homelab HP:
+
+```bash
+gh variable set CI_RUNNERS -R guidodinello/<repo> --body '["self-hosted","linux","x64"]'
+```
+
+Go back to GitHub-hosted:
+
+```bash
+gh variable delete CI_RUNNERS -R guidodinello/<repo>
+```
+
+Declaratively, `github-standard.py` can manage the same variable via a repo's
+optional `"ci_runners": [...]` key — see `docs/github-standard.md` § CI runners.
+It only ever writes a variable a repo explicitly declares; it never unsets one.
+
+### Registering a runner on the homelab HP
+
+**Self-hosted runners on a personal GitHub account are registered per repository —
+there's no org-level pool to share.** Do this once per repo that needs it:
+
+```bash
+# from this machine — mints a short-lived registration token
+gh api -X POST repos/guidodinello/<repo>/actions/runners/registration-token -q .token
+```
+
+```bash
+# on the HP (ssh hp) — matches the naming of the runners already registered
+# on fitted (homelab-hp, homelab-hp-2) and weekly-highlights (homelab-hp-weekly-highlights)
+mkdir -p ~/actions-runner-<repo> && cd ~/actions-runner-<repo>
+curl -o runner.tar.gz -L https://github.com/actions/runner/releases/download/v2.337.0/actions-runner-linux-x64-2.337.0.tar.gz
+tar xzf runner.tar.gz
+./config.sh --url https://github.com/guidodinello/<repo> --token <TOKEN> \
+            --name homelab-hp-<repo> --labels homelab,hp --work _work --unattended
+sudo ./svc.sh install "$USER" && sudo ./svc.sh start
+```
+
+`self-hosted`, `Linux`, and `X64` are added automatically as read-only labels; the
+`--labels` flag above only adds the extra custom ones. Labels match
+case-insensitively, which is why `CI_RUNNERS`'s lowercase `"linux"`/`"x64"` still hit a
+runner registered with `Linux`/`X64`.
+
+Caveats, in order of how likely they are to actually bite:
+
+- **Private repos only.** A self-hosted runner on a public repo lets a fork's PR run
+  arbitrary code on the box. Every repo this applies to is private.
+- **An offline runner queues CI forever, with no timeout.** If the HP (or its network
+  path) is down while `CI_RUNNERS` is set, every PR blocks indefinitely rather than
+  falling back — `gh variable delete` is the escape hatch, not a workflow retry.
+- **Start the runner from a clean shell, not one with a venv activated.** The runner
+  inherits the environment of whatever process started it. A leaked `VIRTUAL_ENV`
+  silently redirects `uv pip install` into the wrong environment inside every job that
+  takes the optional-dependencies branch of this template's install step — install and
+  start the service (`svc.sh`) from a plain login shell, never from inside an
+  activated `.venv`.
+- **The uv cache lives on the host, under the account that runs the service**
+  (`setup-uv` sets `UV_CACHE_DIR` to `~/.cache/uv` there and prunes it) — it's shared
+  and pruned across every repo's runner on that account, not sandboxed per repo.
+
 ## Dependabot
 
 ```bash
