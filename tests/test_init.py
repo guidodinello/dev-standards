@@ -49,6 +49,14 @@ def test_render_ci_keeps_test_job_when_included():
     assert "branches: [develop]" in rendered
 
 
+def test_render_ci_keeps_ci_runners_switch():
+    """Guards against silently dropping the CI_RUNNERS fallback expression during a
+    future template edit — without it, every repo rendered from this template loses
+    its ability to route CI off GitHub-hosted runners (see README § CI runners)."""
+    rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=True)
+    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 2
+
+
 def test_render_pre_commit_substitutes_python_version():
     rendered = init.render_pre_commit("3.11")
     assert "python3.11" in rendered

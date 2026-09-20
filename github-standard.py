@@ -327,6 +327,55 @@ def sync_security(org: str, repo: str, defaults: dict, apply: bool) -> bool:
     return changed
 
 
+def ci_runners_drift(intended: list[str], current: str | None) -> str | None:
+    """None when the CI_RUNNERS Actions variable already matches `intended`;
+    otherwise a short reason string for the log line. `current` is the raw
+    variable value from the API (a JSON-encoded string) or None if the
+    variable doesn't exist. Compares parsed JSON, not raw text, so
+    `["a","b"]` and `["a", "b"]` are treated as equal, and a variable that
+    holds non-JSON garbage is reported rather than crashing the audit."""
+    if current is None:
+        return f"unset, want {json.dumps(intended)}"
+    try:
+        current_parsed = json.loads(current)
+    except json.JSONDecodeError:
+        return f"current value isn't valid JSON ({current!r}), want {json.dumps(intended)}"
+    if current_parsed != intended:
+        return f"config={json.dumps(intended)}, GitHub={json.dumps(current_parsed)}"
+    return None
+
+
+def sync_ci_runners(org: str, repo: str, repo_cfg: dict, apply: bool) -> bool:
+    """Audits/applies the CI_RUNNERS Actions variable (see templates/ci/python-ci.yml
+    and README § CI runners) that switches a repo's CI between GitHub-hosted and
+    self-hosted runners. Absent `ci_runners` in repo_cfg means unmanaged — this never
+    auto-unsets a variable a repo set by hand, and a repo simply not needing the
+    self-hosted fallback shouldn't have to declare an empty list to say so."""
+    intended = repo_cfg.get("ci_runners")
+    if intended is None:
+        return False
+
+    existing = gh_api(f"repos/{org}/{repo}/actions/variables/CI_RUNNERS", allow_404=True)
+    assert existing is None or isinstance(existing, dict), (
+        f"expected object or None from GET .../variables/CI_RUNNERS, got {type(existing)}"
+    )
+    current_value = existing["value"] if existing else None
+    drift = ci_runners_drift(intended, current_value)
+    if drift is None:
+        log_info(f"{repo} CI_RUNNERS — up to date")
+        return False
+
+    log_warn(f"{repo} CI_RUNNERS — drift: {drift}")
+    if apply:
+        body = {"name": "CI_RUNNERS", "value": json.dumps(intended)}
+        if existing is None:
+            gh_api(f"repos/{org}/{repo}/actions/variables", method="POST", body=body)
+        else:
+            gh_api(f"repos/{org}/{repo}/actions/variables/CI_RUNNERS", method="PATCH", body=body)
+        log_info(f"{repo} CI_RUNNERS — applied")
+    return True
+
+
 def sync_ruleset(
     org: str, repo: str, defaults: dict, profiles: dict, repo_cfg: dict, apply: bool
 ) -> bool:
@@ -423,7 +472,8 @@ def main() -> int:
             c3 = False
             if get_repo_tier(profiles, repo_cfg) == "ruleset":
                 c3 = sync_ruleset(org, repo, defaults, profiles, repo_cfg, args.apply)
-            if c1 or c2 or c3:
+            c4 = sync_ci_runners(org, repo, repo_cfg, args.apply)
+            if c1 or c2 or c3 or c4:
                 any_changed = True
         except GhApiError as e:
             any_failed = True

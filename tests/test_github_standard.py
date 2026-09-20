@@ -143,6 +143,39 @@ def test_ruleset_diff_reports_changed_scalar():
     assert "config=0" in diff[0] and "GitHub=1" in diff[0]
 
 
+def test_ci_runners_drift_reports_when_unset():
+    assert gh.ci_runners_drift(["self-hosted", "linux", "x64"], None) is not None
+
+
+def test_ci_runners_drift_none_when_matching():
+    assert (
+        gh.ci_runners_drift(["self-hosted", "linux", "x64"], '["self-hosted","linux","x64"]')
+        is None
+    )
+
+
+def test_ci_runners_drift_ignores_whitespace_differences():
+    """Compares parsed JSON, not raw text — a variable set with spaces after commas
+    (e.g. by hand via the gh CLI) shouldn't read as perpetual drift."""
+    assert (
+        gh.ci_runners_drift(["self-hosted", "linux", "x64"], '["self-hosted", "linux", "x64"]')
+        is None
+    )
+
+
+def test_ci_runners_drift_reports_changed_list():
+    diff = gh.ci_runners_drift(["self-hosted", "linux", "x64"], '["ubuntu-latest"]')
+    assert diff is not None
+    assert "ubuntu-latest" in diff
+    assert "self-hosted" in diff
+
+
+def test_ci_runners_drift_reports_invalid_json():
+    diff = gh.ci_runners_drift(["self-hosted", "linux", "x64"], "not json")
+    assert diff is not None
+    assert "not json" in diff
+
+
 def test_example_config_declares_every_baseline_pull_request_parameter():
     """Regression guard for the phantom: the example config is what every real config is
     copied from, so an undeclared parameter there propagates the never-converging audit
