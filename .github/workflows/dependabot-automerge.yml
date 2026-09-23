@@ -20,7 +20,11 @@ permissions:
 
 jobs:
   auto-merge:
-    runs-on: ubuntu-latest
+    # Same CI_RUNNERS switch as templates/ci/python-ci.yml (see README § CI runners) —
+    # a private repo's GitHub-hosted minutes running out blocks this job exactly like
+    # any other, and it isn't a required check, so an offline self-hosted runner only
+    # delays a merge rather than blocking one.
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
     if: github.actor == 'dependabot[bot]'
     # Surfaced as env rather than read inline so the steps below can branch on whether the
     # App is configured: the `secrets` context is not available in a step `if`, but `env` is.

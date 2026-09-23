@@ -57,6 +57,15 @@ def test_render_ci_keeps_ci_runners_switch():
     assert rendered.count("fromJSON(vars.CI_RUNNERS") == 2
 
 
+def test_render_automerge_keeps_ci_runners_switch():
+    """Same guard as test_render_ci_keeps_ci_runners_switch, for the auto-merge
+    template: without it, auto-merge stays pinned to ubuntu-latest and keeps
+    failing on private repos where GitHub-hosted minutes are billing-blocked
+    (see README § CI runners)."""
+    rendered = init.render_automerge()
+    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 1
+
+
 def test_render_pre_commit_substitutes_python_version():
     rendered = init.render_pre_commit("3.11")
     assert "python3.11" in rendered
