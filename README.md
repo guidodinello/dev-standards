@@ -79,8 +79,8 @@ tool (`push-guidelines.sh`, in `claude-dotfiles`) keeps byte-identical across re
 
 ## CI runners
 
-`templates/ci/python-ci.yml` reads the `CI_RUNNERS` repo variable to pick where its
-jobs run:
+`templates/ci/python-ci.yml` and `templates/dependabot/automerge.yml` both read the
+`CI_RUNNERS` repo variable to pick where their jobs run:
 
 ```yaml
 runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
@@ -91,6 +91,14 @@ because a **private** repo's free GitHub-hosted minutes run out, and every job t
 refuses to start with "recent account payments have failed or your spending limit
 needs to be increased" (hit on `truco`). A public repo has unlimited free minutes and
 needs none of this.
+
+`automerge.yml` follows the same variable rather than staying pinned to
+`ubuntu-latest`: the billing block hits it exactly like any other job on a private
+repo, and it only runs `dependabot/fetch-metadata` and `gh`, both of which work on
+the homelab runner (`gh` and the actions' bundled node ship with the runner install).
+An offline self-hosted runner just delays this job rather than blocking a merge —
+`auto-merge` isn't in any repo's `required_status_checks`, and the job's own
+`if: github.actor == 'dependabot[bot]'` already keeps human and fork PRs off it.
 
 Point CI at the homelab HP:
 
