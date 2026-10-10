@@ -29,6 +29,7 @@ Usage:
     ./init.py my-repo                          # dry run, ~/projects/my-repo
     ./init.py my-repo --apply                  # write files + JSON entry, delegate
     ./init.py my-repo --path ~/other/dir --apply
+    ./init.py my-repo --release --apply        # also add .github/workflows/release.yml
     ./init.py my-repo --checks                 # phase 2: after first green CI —
                                                 # prints a snippet to paste, never writes
     ./init.py my-repo --render-to /tmp/out      # render only, for diffing — no writes elsewhere
@@ -288,12 +289,40 @@ def render_automerge() -> str:
     return (TEMPLATES / "dependabot" / "automerge.yml").read_text()
 
 
+def render_release() -> str:
+    return (TEMPLATES / "release" / "release.yml").read_text()
+
+
 def render_codeowners() -> str:
     return (TEMPLATES / "github" / "CODEOWNERS").read_text()
 
 
 def render_changelog() -> str:
     return (TEMPLATES / "github" / "CHANGELOG.md").read_text()
+
+
+def rendered_files(
+    out_root: Path,
+    *,
+    version: str,
+    install_cmd: str,
+    branch: str,
+    include_tests: bool,
+    release: bool,
+) -> dict[Path, str]:
+    files = {
+        out_root / ".pre-commit-config.yaml": render_pre_commit(version),
+        out_root / ".github" / "workflows" / "ci.yml": render_ci(
+            install_cmd=install_cmd, branch=branch, include_tests=include_tests
+        ),
+        out_root / ".github" / "dependabot.yml": render_dependabot(),
+        out_root / ".github" / "workflows" / "dependabot-automerge.yml": render_automerge(),
+        out_root / ".github" / "CODEOWNERS": render_codeowners(),
+        out_root / "CHANGELOG.md": render_changelog(),
+    }
+    if release:
+        files[out_root / ".github" / "workflows" / "release.yml"] = render_release()
+    return files
 
 
 # ── writing ──────────────────────────────────────────────────────────────
@@ -544,16 +573,14 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
     if args.render_to is not None:
         branch = args.branch or "main"
         out_root = args.render_to
-        files = {
-            out_root / ".pre-commit-config.yaml": render_pre_commit(version),
-            out_root / ".github" / "workflows" / "ci.yml": render_ci(
-                install_cmd=install_cmd, branch=branch, include_tests=include_tests
-            ),
-            out_root / ".github" / "dependabot.yml": render_dependabot(),
-            out_root / ".github" / "workflows" / "dependabot-automerge.yml": render_automerge(),
-            out_root / ".github" / "CODEOWNERS": render_codeowners(),
-            out_root / "CHANGELOG.md": render_changelog(),
-        }
+        files = rendered_files(
+            out_root,
+            version=version,
+            install_cmd=install_cmd,
+            branch=branch,
+            include_tests=include_tests,
+            release=args.release,
+        )
         for path, content in files.items():
             write_rendered(path, content, apply=args.apply, force=args.force)
         log_info(f"Rendered to {out_root} — no JSON entry, no delegate, no API writes.")
@@ -567,16 +594,14 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
     preflight_ruleset(org, args.repo, branch)
 
     out_root = repo_root
-    files = {
-        out_root / ".pre-commit-config.yaml": render_pre_commit(version),
-        out_root / ".github" / "workflows" / "ci.yml": render_ci(
-            install_cmd=install_cmd, branch=branch, include_tests=include_tests
-        ),
-        out_root / ".github" / "dependabot.yml": render_dependabot(),
-        out_root / ".github" / "workflows" / "dependabot-automerge.yml": render_automerge(),
-        out_root / ".github" / "CODEOWNERS": render_codeowners(),
-        out_root / "CHANGELOG.md": render_changelog(),
-    }
+    files = rendered_files(
+        out_root,
+        version=version,
+        install_cmd=install_cmd,
+        branch=branch,
+        include_tests=include_tests,
+        release=args.release,
+    )
     for path, content in files.items():
         write_rendered(path, content, apply=args.apply, force=args.force)
 
@@ -634,6 +659,11 @@ def main() -> int:
         action=argparse.BooleanOptionalAction,
         default=None,
         help="Override test-job-inclusion detection.",
+    )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Also render the tag-triggered release workflow (libraries/distributed apps only).",
     )
     parser.add_argument(
         "--checks",

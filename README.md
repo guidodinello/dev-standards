@@ -33,7 +33,7 @@ dev-dependency style, and test presence from the target repo's own
 in; adds a `{"profile": "baseline"}` entry to `github-standard.json`; then
 delegates to `github-standard.py --apply`. Dry run by default; every detected
 value has an override flag (`--python`, `--dev-style`, `--tests`/`--no-tests`,
-`--locked`, `--branch`). Refuses to overwrite a file that already exists
+`--locked`, `--branch`); `--release` additionally renders the release workflow (see § Releases). Refuses to overwrite a file that already exists
 (`--force` to override) and never touches an already-registered repo's JSON
 entry.
 
@@ -79,6 +79,20 @@ template for when to add them. Copy and genericize, don't symlink — CI workflo
 are repo-specific enough (dependency install command, test markers) that a template
 needs a few `<FIXME>` spots filled in per repo, unlike the guideline files a sibling
 tool (`push-guidelines.sh`, in `claude-dotfiles`) keeps byte-identical across repos.
+
+## Releases
+
+```bash
+./init.py my-repo --release --apply      # adds .github/workflows/release.yml
+cp templates/release/release.yml <repo>/.github/workflows/release.yml   # JS repos
+```
+
+Opt-in, for libraries and distributed apps only. A pushed `vX.Y.Z` tag becomes a GitHub
+Release: the workflow checks the tag against the manifest version, takes the notes from
+that version's `CHANGELOG.md` section, builds and attaches the artifacts (Python: wheel +
+sdist via `uv build`; JS/extension: a `BUILD_COMMAND`/`ARTIFACTS` hook), with
+`contents: write` on that one job only. The policy (SemVer, curated changelog,
+`chore(release)` PR then annotated tag) is in `docs/github-standard.md` § Releases.
 
 ## CI runners
 

@@ -207,6 +207,38 @@ missing secret, reports "not configured" in the job summary, and leaves the PR f
 manual merge (which does trigger a deploy). It doesn't fail loudly, so a repo adopting
 this template before the App is set up isn't broken, just not yet automated.
 
+## Releases
+
+Only repos where a release means something — a library others pin, an app that ships
+installable artifacts — cut releases. An app that merely tracks a dependency (catan,
+truco-py) doesn't, and doesn't adopt `templates/release/release.yml`.
+
+- **Versioning:** [SemVer](https://semver.org). The manifest version (`pyproject.toml`
+  `[project].version` or `package.json` `version`) is static and is the single source of
+  truth for it.
+- **Changelog:** a curated [Keep a Changelog](https://keepachangelog.com) `CHANGELOG.md`
+  (`templates/github/CHANGELOG.md`) is the source of the release notes. Written by
+  hand, not generated from commit messages — which is why release-please and
+  semantic-release are deliberately not used.
+- **Cutting a release:**
+  1. Open a `chore(release): vX.Y.Z` PR: bump the manifest, move `[Unreleased]` under a
+     new `## [X.Y.Z] - YYYY-MM-DD` section, update the compare links at the bottom.
+  2. Squash-merge it.
+  3. Create an **annotated** tag on the merge commit and push it:
+     `git tag -a vX.Y.Z -m vX.Y.Z <merge-sha> && git push origin vX.Y.Z`.
+- **Automation:** the tag push triggers the `Release` workflow, which verifies the tag
+  equals the manifest version and sits on the default branch, uses that version's
+  CHANGELOG section as the notes, builds the artifacts (Python: `uv build`, wheel +
+  sdist; JS/extension: the `BUILD_COMMAND`/`ARTIFACTS` hook, e.g. pullscope's
+  `wxt zip` for chrome + firefox), and creates the GitHub Release (a version with a
+  letter or `-` is marked pre-release). `contents: write` is granted to that one job
+  only. A failed verification publishes nothing: fix it, delete the tag
+  (`git push origin :refs/tags/vX.Y.Z`), and re-tag.
+- **Adopting:** `./init.py <repo> --release` adds the workflow for a Python repo; for
+  JS repos `cp templates/release/release.yml` and swap the toolchain step and the two
+  env values as the template's comments show. It is opt-in and not part of the default
+  bootstrap.
+
 ## Adding a new repo
 
 For a Python repo taking the standard CI/pre-commit/Dependabot templates, use
