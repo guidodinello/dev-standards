@@ -8,8 +8,18 @@
 # subprojects — not needed for a single package).
 #
 # Adopt: cp to .github/workflows/ci.yml, fill in the two <FIXME> spots,
-# then add "Lint Python" and "Tests (Python)" as required_status_checks
-# contexts for this repo in github-standard.json.
+# then require ONLY the aggregate `CI` job below in the branch ruleset, pinned
+# to the GitHub Actions app: {"context": "CI", "integration_id": 15368} in
+# github-standard.json (integration_id stops another app from satisfying it).
+# Per-job/per-matrix-leg contexts (e.g. "Tests (Python) (3.13)") silently stop
+# gating when a job or matrix is renamed; `CI` is stable and fails if any job
+# it needs failed or was cancelled, so a new job only needs adding to its
+# `needs:` list.
+#
+# Deliberately not in this baseline (add per repo if wanted): `uv sync
+# --locked` (init.py --locked), and an actionlint job (docker:// needs Docker
+# on the runner, which would turn a Docker-less self-hosted runner into a
+# merge block — add it once the repo writes its own workflows).
 #
 # Before the first push, check the target repo actually has what this
 # workflow assumes — two gaps found rolling this out the first time:
@@ -31,6 +41,14 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+# Superseded pull_request runs are cancelled. Every other event (push to main,
+# workflow_dispatch) gets a unique group, so it is never cancelled or replaced
+# by a newer pending run -- GitHub drops a pending run in the same group even
+# with cancel-in-progress false, which could leave a main commit with no CI.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Default GITHUB_TOKEN scope for every job below — neither lints nor tests
 # writes anything (no comments, no pushes, no packages). Least privilege.
@@ -80,3 +98,26 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  # Single stable check name for the branch ruleset (see header comment).
+  # if: always() so it still runs (and fails) when a needed job fails; a
+  # skipped required check would count as passing.
+  ci:
+    name: CI
+    needs:
+      - lint-python
+      - test-python
+    if: always()
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Check results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          read -ra results <<< "$RESULTS"
+          for r in "${results[@]}"; do
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "A required job finished as: $r"
+              exit 1
+            fi
+          done

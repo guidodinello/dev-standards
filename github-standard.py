@@ -202,6 +202,20 @@ def ruleset_diff(intended: dict, current: dict) -> list[str]:
                     out.append(f"{path}.{k}: only in config ({a[k]!r})")
                 else:
                     walk(a[k], b[k], f"{path}.{k}")
+        elif isinstance(a, list) and path.endswith(".required_status_checks"):
+            assert isinstance(b, list)
+            # keyed by context: a per-job list -> single pinned `CI` migration should
+            # name the contexts added/removed and any integration_id mismatch, not
+            # just "2 item(s) vs 1".
+            ma = {c["context"]: c for c in a}
+            mb = {c["context"]: c for c in b}
+            for ctx in sorted(set(ma) | set(mb)):
+                if ctx not in mb:
+                    out.append(f"{path}[{ctx}]: only in config ({ma[ctx]!r})")
+                elif ctx not in ma:
+                    out.append(f"{path}[{ctx}]: only on GitHub ({mb[ctx]!r})")
+                else:
+                    walk(ma[ctx], mb[ctx], f"{path}[{ctx}]")
         elif isinstance(a, list):
             assert isinstance(b, list)
             if len(a) != len(b):
@@ -230,7 +244,8 @@ def normalize(ruleset: dict) -> dict:
         params = rule.get("parameters")
         if isinstance(params, dict) and "required_status_checks" in params:
             params["required_status_checks"] = sorted(
-                params["required_status_checks"], key=lambda c: c["context"]
+                params["required_status_checks"],
+                key=lambda c: (c["context"], c.get("integration_id", -1)),
             )
         if isinstance(params, dict) and "required_reviewers" in params:
             params["required_reviewers"] = sorted(params["required_reviewers"], key=json.dumps)

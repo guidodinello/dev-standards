@@ -16,7 +16,9 @@ every detected value has an override flag. Required status
 checks are deliberately NOT part of the one-step flow: docs/github-standard.md
 is explicit that a required-check context is a job's display name, read off a
 real CI run and hand-confirmed — never auto-derived. Run --checks after the
-first green CI run to add them.
+first green CI run: it prints the single `CI` context pinned with integration_id
+15368 when the repo's CI has the aggregate job, else the per-job contexts plus a
+hint to adopt it.
 
 `github-standard.json` is gitignored, hand-aligned, and carries real
 rationale in its comments — this never does a json.loads/json.dumps
@@ -38,6 +40,7 @@ Requires: `gh` CLI, authenticated with a token that has the `repo` scope
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import subprocess
@@ -239,7 +242,7 @@ _FIXME_TEST_BLOCK = (
 _NO_TESTS_COMMENT = (
     '# No "Tests (Python)" job yet — this repo has no test suite. Add one (pytest\n'
     "# as a dev dependency, a tests/ directory) then bring that job back from the\n"
-    "# template and add its context to required_status_checks in github-standard.json.\n"
+    "# template and add it to the `CI` job's needs: list below.\n"
 )
 
 
@@ -259,18 +262,18 @@ def render_ci(*, install_cmd: str, branch: str, include_tests: bool) -> str:
     text = _must_replace(text, "branches: [main]", f"branches: [{branch}]")
 
     if not include_tests:
-        anchor = "\n  test-python:"
-        if anchor not in text:
-            raise RuntimeError(
-                f"Expected {anchor!r} job marker not found — templates/ may have changed"
-            )
-        before, _, _ = text.partition(anchor)
-        text = before.rstrip("\n") + "\n"
+        start = "\n  test-python:"
+        end = "\n  # Single stable check name"
+        if start not in text or end not in text:
+            raise RuntimeError(f"Expected {start!r}/{end!r} markers not found — templates/ changed")
+        before, _, rest = text.partition(start)
+        _, _, after = rest.partition(end)
+        text = before.rstrip("\n") + "\n" + end + after
+        text = _must_replace(text, "      - test-python\n", "")
         text = _must_replace(
             text,
-            '# then add "Lint Python" and "Tests (Python)" as required_status_checks\n',
-            '# then add "Lint Python" as a required_status_checks context (no test job\n'
-            "# below yet — see the note under jobs:)\n",
+            "# Adopt: cp to .github/workflows/ci.yml, fill in the two <FIXME> spots,\n",
+            "# Adopt: cp to .github/workflows/ci.yml, fill in the <FIXME> spot,\n",
         )
         text = _must_replace(text, "jobs:\n", f"jobs:\n{_NO_TESTS_COMMENT}")
 
@@ -407,6 +410,55 @@ def print_checklist(org: str, repo: str, *, docs_present: bool) -> None:
 # ── checks mode (phase 2) ────────────────────────────────────────────────
 
 
+ACTIONS_APP_ID = 15368  # GitHub Actions' own app id, pinned so no other app can satisfy a check
+
+
+def has_aggregate_ci_job(workflow_text: str | None) -> bool:
+    """True if the workflow has a job named `CI` that `needs:` other jobs and runs
+    `if: always()` (the aggregate pattern from templates/ci/python-ci.yml). A bare
+    check-run called "CI" proves nothing — only the workflow shows it gates on the rest."""
+    if not workflow_text:
+        return False
+    for block in re.split(r"\n(?=  [\w-]+:\n)", workflow_text):
+        if re.search(r"^    name:\s*[\"']?CI[\"']?\s*$", block, re.M):
+            return bool(
+                re.search(r"^    needs:", block, re.M)
+                and re.search(r"^    if:\s*always\(\)", block, re.M)
+            )
+    return False
+
+
+def checks_snippet(
+    check_runs: list[dict], workflow_text: str | None
+) -> tuple[list[dict], str | None]:
+    """Pure: (check-runs seen on the branch, ci.yml text) -> (required_status_checks
+    entries, hint). Aggregate mode emits the single `CI` context pinned to the app
+    that produced it; anything else falls back to one entry per seen context."""
+    ci_runs = [c for c in check_runs if c["name"] == "CI"]
+    if has_aggregate_ci_job(workflow_text) and ci_runs:
+        app_id = (ci_runs[0].get("app") or {}).get("id")
+        if app_id == ACTIONS_APP_ID:
+            return [{"context": "CI", "integration_id": app_id}], None
+        return (
+            [{"context": c} for c in sorted({c["name"] for c in check_runs})],
+            f"Aggregate CI job found, but its check-run came from app {app_id!r}, "
+            f"not GitHub Actions ({ACTIONS_APP_ID}) — not pinning it; check by hand.",
+        )
+    return (
+        [{"context": c} for c in sorted({c["name"] for c in check_runs})],
+        "No aggregate `CI` job in .github/workflows/ci.yml — listing per-job contexts. "
+        "Adopt the aggregate job from templates/ci/python-ci.yml, then re-run --checks "
+        "to require the single pinned `CI` context instead.",
+    )
+
+
+def fetch_workflow_text(org: str, repo: str, branch: str) -> str | None:
+    obj = gh_get(f"repos/{org}/{repo}/contents/.github/workflows/ci.yml?ref={branch}")
+    if not isinstance(obj, dict) or "content" not in obj:
+        return None
+    return base64.b64decode(obj["content"]).decode()
+
+
 def run_checks_mode(org: str, repo: str, branch: str) -> int:
     config = json.loads(CONFIG_PATH.read_text())
     if repo not in config.get("repos", {}):
@@ -419,14 +471,17 @@ def run_checks_mode(org: str, repo: str, branch: str) -> int:
             f"Couldn't read check-runs for {org}/{repo}@{branch} — has CI ever run on this branch?"
         )
         return 1
-    contexts = sorted({c["name"] for c in check_runs["check_runs"]})
-    if not contexts:
+    if not check_runs["check_runs"]:
         log_err(
             f"No check runs found on {org}/{repo}@{branch} yet — push once and let CI finish first."
         )
         return 1
 
-    log_info(f"Contexts seen on {org}/{repo}@{branch}: {contexts}")
+    checks, hint = checks_snippet(check_runs["check_runs"], fetch_workflow_text(org, repo, branch))
+    seen = sorted({c["name"] for c in check_runs["check_runs"]})
+    log_info(f"Contexts seen on {org}/{repo}@{branch}: {seen}")
+    if hint:
+        log_warn(hint)
     log_warn(
         "Not auto-splicing this — docs/github-standard.md is explicit that required-check "
         "contexts must be hand-confirmed, never regenerated from CI automatically. "
@@ -441,7 +496,7 @@ def run_checks_mode(org: str, repo: str, branch: str) -> int:
                         "parameters": {
                             "strict_required_status_checks_policy": False,
                             "do_not_enforce_on_create": False,
-                            "required_status_checks": [{"context": c} for c in contexts],
+                            "required_status_checks": checks,
                         },
                     }
                 ]

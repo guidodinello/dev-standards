@@ -184,3 +184,57 @@ def test_example_config_declares_every_baseline_pull_request_parameter():
     rules = example["defaults"]["ruleset"]["rules"]
     pr_params = next(r for r in rules if r["type"] == "pull_request")["parameters"]
     assert "require_extra_approval_for_unattributed_changes" in pr_params
+
+
+def _checks_ruleset(checks: list[dict]) -> dict:
+    return {
+        "name": "main",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+        "rules": [
+            {
+                "type": "required_status_checks",
+                "parameters": {"required_status_checks": checks},
+            }
+        ],
+    }
+
+
+PINNED = {"context": "CI", "integration_id": 15368}
+
+
+def test_ruleset_diff_integration_id_identical_is_clean():
+    r = gh.normalize(_checks_ruleset([PINNED]))
+    assert gh.ruleset_diff(r, gh.normalize(_checks_ruleset([dict(PINNED)]))) == []
+
+
+def test_ruleset_diff_names_integration_id_missing_on_github():
+    intended = gh.normalize(_checks_ruleset([PINNED]))
+    current = gh.normalize(_checks_ruleset([{"context": "CI"}]))
+    diff = gh.ruleset_diff(intended, current)
+    assert len(diff) == 1
+    assert "integration_id" in diff[0] and "only in config" in diff[0]
+
+
+def test_ruleset_diff_per_job_to_single_ci_names_added_and_removed_contexts():
+    intended = gh.normalize(_checks_ruleset([PINNED]))
+    current = gh.normalize(_checks_ruleset([{"context": "Lint Python"}, {"context": "Tests"}]))
+    diff = gh.ruleset_diff(intended, current)
+    assert any("[CI]" in d and "only in config" in d for d in diff)
+    assert any("[Lint Python]" in d and "only on GitHub" in d for d in diff)
+    assert any("[Tests]" in d and "only on GitHub" in d for d in diff)
+
+
+def test_normalize_orders_same_context_by_integration_id():
+    a = gh.normalize(_checks_ruleset([{"context": "x", "integration_id": 2}, {"context": "x"}]))
+    b = gh.normalize(_checks_ruleset([{"context": "x"}, {"context": "x", "integration_id": 2}]))
+    assert a == b
+
+
+def test_example_config_pins_ci_integration_id():
+    example = json.loads((REPO_ROOT / "github-standard.example.json").read_text())
+    branches = example["repos"]["my-repo-with-ci"]["branches"]
+    rule = branches["main"]["extra_rules"][0]
+    assert rule["parameters"]["required_status_checks"] == [PINNED]
