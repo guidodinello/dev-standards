@@ -132,3 +132,51 @@ def test_checks_snippet_refuses_to_pin_foreign_app():
     checks, hint = init.checks_snippet([{"name": "CI", "app": {"id": 1}}], AGGREGATE_WF)
     assert checks == [{"context": "CI"}]
     assert hint is not None and "not GitHub Actions" in hint
+
+
+def _rendered(tmp_path, *, release):
+    return init.rendered_files(
+        tmp_path,
+        version="3.13",
+        install_cmd="uv sync --dev",
+        branch="main",
+        include_tests=True,
+        release=release,
+    )
+
+
+def test_release_workflow_is_opt_in(tmp_path):
+    release_path = tmp_path / ".github" / "workflows" / "release.yml"
+    assert release_path not in _rendered(tmp_path, release=False)
+    assert _rendered(tmp_path, release=True)[release_path] == init.render_release()
+
+
+def test_release_template_is_least_privilege_and_tag_triggered():
+    text = init.render_release()
+    assert 'tags: ["v*"]' in text
+    assert (
+        text.count("\n      contents: write\n") == 1
+    )  # one job; top level stays `permissions: {}`
+    assert "\npermissions: {}\n" in text
+    assert text.count("fromJSON(vars.CI_RUNNERS") == 1
+
+
+def test_release_template_gates_publish_on_verification():
+    text = init.render_release()
+    # verification and notes extraction both precede the build and the release
+    order = [
+        text.index("Verify tag, version, and branch"),
+        text.index("Extract release notes from CHANGELOG.md"),
+        text.index("Build artifacts"),
+        text.index("gh release create"),
+    ]
+    assert order == sorted(order)
+    assert "--verify-tag" in text
+
+
+def test_release_flag_parses(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["init.py", "x", "--release"])
+    seen = {}
+    monkeypatch.setattr(init, "run_bootstrap_mode", lambda a: seen.setdefault("r", a.release) or 0)
+    init.main()
+    assert seen["r"] is True
