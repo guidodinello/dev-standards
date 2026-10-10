@@ -19,7 +19,10 @@
 # 1.2.3rc1); a version containing a letter or `-` is published as a pre-release.
 #
 # Least privilege: `contents: write` is granted to this workflow's one job and
-# nowhere else (CI keeps `contents: read`).
+# nowhere else (CI keeps `contents: read`). Because of that, every action here
+# is pinned to a full commit SHA (the tag is a trailing comment; Dependabot's
+# github-actions ecosystem keeps both in step) and checkout does not persist
+# the token into .git/config.
 name: Release
 
 on:
@@ -46,14 +49,17 @@ jobs:
       BUILD_COMMAND: uv build --out-dir dist
       ARTIFACTS: dist/*
       # JS/extension example (pullscope): also swap the setup-uv step below for
-      # actions/setup-node, then:
+      # pnpm/action-setup + actions/setup-node (SHA-pinned like the rest; see
+      # pullscope's release.yml for the pins), then:
       #   BUILD_COMMAND: npm ci && npm run zip && npm run zip:firefox
       #   ARTIFACTS: .output/*.zip
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # Full history so we can check the tag's commit is on the default branch.
           fetch-depth: 0
+          # Only the final release step needs the token, and it gets it via GH_TOKEN.
+          persist-credentials: false
 
       - name: Verify tag, version, and branch
         env:
@@ -111,7 +117,7 @@ jobs:
             exit 1
           fi
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
 
       - name: Build artifacts
         run: bash -c "$BUILD_COMMAND"
