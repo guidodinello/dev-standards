@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from conftest import REPO_ROOT, import_module_from_path
 
@@ -172,6 +174,24 @@ def test_release_template_gates_publish_on_verification():
     ]
     assert order == sorted(order)
     assert "--verify-tag" in text
+
+
+def test_release_template_pins_every_action_to_a_sha():
+    uses = [
+        line.strip()
+        for line in init.render_release().splitlines()
+        if "uses:" in line and not line.lstrip().startswith("#")
+    ]
+    assert uses
+    for line in uses:
+        assert re.fullmatch(r"- uses: \S+@[0-9a-f]{40} # v\d.*", line), line
+
+
+def test_release_checkout_does_not_persist_credentials():
+    text = init.render_release()
+    step = text[text.index("actions/checkout@") :].split("\n\n")[0]
+    assert "persist-credentials: false" in step
+    assert "fetch-depth: 0" in step  # the on-default-branch check needs full history
 
 
 def test_release_flag_parses(monkeypatch):

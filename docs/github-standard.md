@@ -234,6 +234,12 @@ truco-py) doesn't, and doesn't adopt `templates/release/release.yml`.
   letter or `-` is marked pre-release). `contents: write` is granted to that one job
   only. A failed verification publishes nothing: fix it, delete the tag
   (`git push origin :refs/tags/vX.Y.Z`), and re-tag.
+- **Supply chain:** the release workflow is the one with `contents: write`, so its
+  actions are SHA-pinned (tag as a trailing comment) and checkout uses
+  `persist-credentials: false`, keeping the token out of `.git/config` for the build
+  step. In adopters, Dependabot's `github-actions` ecosystem (already in
+  `templates/dependabot/python.yml` and `npm.yml`) keeps the SHA pins updated. The
+  template copy here isn't scanned by Dependabot (#25), so refresh its pins by hand.
 - **Adopting:** `./init.py <repo> --release` adds the workflow for a Python repo; for
   JS repos `cp templates/release/release.yml` and swap the toolchain step and the two
   env values as the template's comments show. It is opt-in and not part of the default
