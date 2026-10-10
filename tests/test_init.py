@@ -54,7 +54,7 @@ def test_render_ci_keeps_ci_runners_switch():
     future template edit — without it, every repo rendered from this template loses
     its ability to route CI off GitHub-hosted runners (see README § CI runners)."""
     rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=True)
-    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 2
+    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 3
 
 
 def test_render_automerge_keeps_ci_runners_switch():
@@ -77,3 +77,58 @@ def test_main_requires_repo_argument(monkeypatch):
     monkeypatch.setattr("sys.argv", ["init.py"])
     with pytest.raises(SystemExit):
         init.main()
+
+
+def _ci_needs(rendered: str) -> list[str]:
+    block = rendered.split("\n  ci:\n")[1]
+    needs = block.split("    needs:\n")[1].split("    if:")[0]
+    return [line.strip()[2:] for line in needs.splitlines()]
+
+
+def test_render_ci_aggregate_job_needs_every_job():
+    rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=True)
+    assert _ci_needs(rendered) == ["lint-python", "test-python"]
+    assert "if: always()" in rendered
+
+
+def test_render_ci_without_tests_keeps_aggregate_job_without_dangling_need():
+    rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=False)
+    assert _ci_needs(rendered) == ["lint-python"]
+    assert "test-python" not in rendered
+    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 2
+
+
+AGGREGATE_WF = (REPO_ROOT / "templates" / "ci" / "python-ci.yml").read_text()
+
+
+def test_has_aggregate_ci_job():
+    assert init.has_aggregate_ci_job(AGGREGATE_WF) is True
+    assert init.has_aggregate_ci_job(None) is False
+    no_always = AGGREGATE_WF.replace("    if: always()\n", "")
+    assert init.has_aggregate_ci_job(no_always) is False
+
+
+def test_checks_snippet_aggregate_pins_integration_id_from_app():
+    runs = [{"name": "Lint Python"}, {"name": "CI", "app": {"id": 15368}}]
+    checks, hint = init.checks_snippet(runs, AGGREGATE_WF)
+    assert checks == [{"context": "CI", "integration_id": 15368}]
+    assert hint is None
+
+
+def test_checks_snippet_falls_back_with_hint_without_aggregate_job():
+    runs = [{"name": "Tests (Python)"}, {"name": "Lint Python"}]
+    checks, hint = init.checks_snippet(runs, None)
+    assert checks == [{"context": "Lint Python"}, {"context": "Tests (Python)"}]
+    assert hint is not None and "aggregate" in hint
+
+
+def test_checks_snippet_bare_ci_check_without_aggregate_workflow_is_not_pinned():
+    checks, hint = init.checks_snippet([{"name": "CI", "app": {"id": 15368}}], "jobs:\n")
+    assert checks == [{"context": "CI"}]
+    assert hint is not None
+
+
+def test_checks_snippet_refuses_to_pin_foreign_app():
+    checks, hint = init.checks_snippet([{"name": "CI", "app": {"id": 1}}], AGGREGATE_WF)
+    assert checks == [{"context": "CI"}]
+    assert hint is not None and "not GitHub Actions" in hint

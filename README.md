@@ -40,8 +40,9 @@ entry.
 Required status checks are deliberately **not** part of this — a check
 context has to be read off a real CI run and hand-confirmed (see
 `docs/github-standard.md` § Required checks). Run `./init.py my-repo --checks`
-once CI has gone green at least once; it prints the snippet to paste rather
-than writing it, since the JSON entry is by then a nested structure this
+once CI has gone green at least once; it prints the single `CI` context pinned
+with `integration_id` 15368 (or the per-job contexts plus a hint, if the repo's CI
+lacks the aggregate job) to paste rather than writing it, since the JSON entry is by then a nested structure this
 script won't touch automatically.
 
 The manual `cp` recipes below still work and are what `init.py` runs under
@@ -70,7 +71,9 @@ cp templates/ci/python-ci.yml       <repo>/.github/workflows/ci.yml
 ```
 
 Baseline for a Python repo with no CI yet (or a thin one) — lint (ruff) + test
-(pytest), mirrored between local pre-commit and a required CI gate. Deliberately
+(pytest), mirrored between local pre-commit and a required CI gate. An aggregate
+`CI` job `needs:` every other job, so the ruleset requires that one context
+(pinned `integration_id` 15368) instead of a list that rots when jobs are renamed. Deliberately
 narrow: no typecheck, no path filtering — see the comments at the top of each
 template for when to add them. Copy and genericize, don't symlink — CI workflows
 are repo-specific enough (dependency install command, test markers) that a template

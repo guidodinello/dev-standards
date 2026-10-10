@@ -62,8 +62,9 @@ classic branch protection — GitHub's newer, evaluatable mechanism):
 ruleset UI defaults this to `1`, which on a solo repo makes every PR permanently
 unmergeable (no one else exists to approve it). The template hardcodes `0`.
 
-Repos with real CI additionally get `required_status_checks`, added at the branch
-level (not the profile level — see § Profiles).
+Repos with real CI additionally get `required_status_checks` (the single pinned `CI`
+context — see § Required checks), added at the branch level (not the profile level —
+see § Profiles).
 
 **A CI check you don't fully trust should never be a required check.** A free-tier
 scanner whose quota exhaustion marks it failed/canceled (rather than skipped) would
@@ -111,14 +112,28 @@ repo that needs it (with a comment explaining why) is cheaper and clearer than a
 abstraction serving a single consumer. Promote a shape into a named profile once a
 *third* repo needs it.
 
-## Required checks — never derived from CI
+## Required checks — one pinned `CI` context
 
-A required-check context is a job's *display name*, not its file or step name, and
-picking the wrong one silently makes the required-check rule toothless. Read the
-actual contexts off a recent commit —
-`gh api repos/{org}/{repo}/commits/{branch}/check-runs --jq '[.check_runs[].name]'`
-— then hand-write them into the config. Treat the config as authoritative afterward;
-don't regenerate it from CI on every run.
+Require a single context, the aggregate `CI` job from `templates/ci/python-ci.yml`
+(job id `ci`, name `CI`, `needs:` every other job, `if: always()`, fails on any
+failure or cancellation), pinned to the GitHub Actions app:
+
+```json
+{ "context": "CI", "integration_id": 15368 }
+```
+
+Per-job and per-matrix-leg contexts (`Tests (Python) (3.13)`) rot: rename a job or
+change a matrix and the old context is never reported again, so the rule quietly
+stops gating. `CI` is stable; a new job only needs adding to its `needs:` list.
+`integration_id: 15368` (the Actions app) stops any other app or status from
+satisfying the check by posting a result named `CI`.
+
+A context is still a job's *display name*, read off a real run, not guessed —
+`./init.py <repo> --checks` does this: it prints the single pinned `CI` entry when
+the repo's `ci.yml` has the aggregate job, otherwise the per-job contexts plus a
+hint to adopt it. Treat the config as authoritative afterward; don't regenerate it
+from CI on every run. A repo's CI must gain the `CI` job *before* its ruleset
+switches to requiring it, or every PR blocks on a check that never reports.
 
 ## No upsert — match by name, never blind-create
 
@@ -200,11 +215,13 @@ version, dev-dependency style, and test presence, renders all four templates,
 adds a `{"profile": "baseline"}` entry to `github-standard.json`, and delegates
 to `github-standard.py --apply` in one step. Then, once CI has gone green at
 least once, `./init.py <repo> --checks` prints the `required_status_checks`
-snippet to merge in by hand (see § Required checks above — never auto-derived).
+snippet to merge in by hand (the single `CI` context pinned with
+`integration_id` 15368 — see § Required checks above).
 
 For a scratch repo (`hobby`, no ruleset) or one that doesn't fit the Python
 templates (an `"oss"`/`"flagship"` shape, or a different language entirely),
 add the entry by hand: `{"profile": "hobby"}` or `{"profile": "baseline"}` (or
 `"oss"`/`"flagship"`), plus a `branches` block with `extra_rules` for
-`required_status_checks` once it has real CI. Then
+`required_status_checks` (the pinned `CI` context, once its CI has the aggregate
+job) once it has real CI. Then
 `./github-standard.py <repo> --apply`.
