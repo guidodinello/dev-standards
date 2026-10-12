@@ -239,7 +239,9 @@ truco-py) doesn't, and doesn't adopt `templates/release/release.yml`.
   `persist-credentials: false`, keeping the token out of `.git/config` for the build
   step. In adopters, Dependabot's `github-actions` ecosystem (already in
   `templates/dependabot/python.yml` and `npm.yml`) keeps the SHA pins updated. The
-  template copy here isn't scanned by Dependabot (#25), so refresh its pins by hand.
+  template copy here is kept current the same way: a checked-in
+  `.github/workflows/release.yml` exists only so Dependabot scans it, and
+  `sync_self_host.py` propagates its bumps (SHA and tag comment) into the template.
 - **Adopting:** `./init.py <repo> --release` adds the workflow for a Python repo; for
   JS repos `cp templates/release/release.yml` and swap the toolchain step and the two
   env values as the template's comments show. It is opt-in and not part of the default

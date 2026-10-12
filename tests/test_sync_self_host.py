@@ -24,6 +24,20 @@ def test_sync_pins_updates_action_uses():
     assert updated == "      - uses: actions/checkout@v8\n"
 
 
+def test_sync_pins_updates_sha_pin_and_its_tag_comment():
+    checked_in = "      - uses: actions/checkout@" + "b" * 40 + "  # v8\n"
+    template = "      - uses: actions/checkout@" + "a" * 40 + " # v7\n"
+    updated = sync_self_host.sync_pins(checked_in, template)
+    assert updated == checked_in
+    assert "# v7" not in updated
+
+
+def test_sync_pins_tag_pin_does_not_swallow_following_lines():
+    checked_in = "      - uses: actions/checkout@v8\n        with:\n          x: 1\n"
+    template = "      - uses: actions/checkout@v7\n        with:\n          x: 1\n"
+    assert sync_self_host.sync_pins(checked_in, template) == checked_in
+
+
 def test_sync_pins_ignores_pins_absent_from_checked_in():
     # A repo/action only present in templates/ (not yet adopted downstream)
     # must be left alone — sync only touches keys it can actually verify.

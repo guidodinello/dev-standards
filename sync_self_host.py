@@ -9,6 +9,9 @@ tests/test_self_host.py fails loudly when that happens; this script is the
 fix, applied automatically by .github/workflows/sync-self-host-templates.yml
 on Dependabot's own PRs (see that workflow for why it can push at all).
 
+templates/release/release.yml has a checked-in copy here for the same reason
+(Dependabot must see its SHA pins), though this repo never cuts releases.
+
 Matches pins by identity (a pre-commit repo URL, or an action name before the
 `@`) rather than by position, so it's safe to run even when templates/ has
 unrelated text drift from the checked-in file (FIXME blocks, branch names).
@@ -24,8 +27,10 @@ REPO_ROOT = Path(__file__).resolve().parent
 # entry in a .pre-commit-config.yaml regardless of which repo it is.
 _PRE_COMMIT_REV = re.compile(r"(repo:\s*(\S+)\n\s*rev:\s*)(\S+)")
 
-# `uses: owner/action@VERSION` — matches every action pin in a workflow file.
-_ACTION_USES = re.compile(r"(uses:\s*([^@\s]+)@)(\S+)")
+# `uses: owner/action@VERSION [# tag]` — matches every action pin in a workflow
+# file. The optional same-line comment is part of the pin: SHA-pinned actions
+# carry their tag there (`@<sha> # v7`), and Dependabot bumps both together.
+_ACTION_USES = re.compile(r"(uses:\s*([^@\s]+)@)(\S+(?:[ \t]+#[^\n]*)?)")
 
 PAIRS = [
     (REPO_ROOT / ".pre-commit-config.yaml", REPO_ROOT / "templates/pre-commit/python.yaml"),
@@ -34,6 +39,8 @@ PAIRS = [
         REPO_ROOT / ".github/workflows/dependabot-automerge.yml",
         REPO_ROOT / "templates/dependabot/automerge.yml",
     ),
+    # Checked in only so Dependabot scans its SHA pins; it fires on `v*` tags.
+    (REPO_ROOT / ".github/workflows/release.yml", REPO_ROOT / "templates/release/release.yml"),
 ]
 
 
