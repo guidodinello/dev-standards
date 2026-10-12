@@ -18,7 +18,10 @@ drift. `.github/workflows/sync-self-host-templates.yml` runs `sync_self_host.py`
 on Dependabot's own PRs to propagate the bump automatically (reusing the same
 GitHub App as `automerge.yml`, for the same GITHUB_TOKEN-permissions reason —
 see docs/github-standard.md § Dependabot); without that App configured, run
-`./sync_self_host.py` by hand when that test goes red.
+`./sync_self_host.py` by hand when that test goes red. The same applies to
+`.github/workflows/release.yml`, a checked-in copy of the release template kept only
+so Dependabot sees its SHA pins. This repo doesn't cut releases: don't push `v*` tags
+here, since that workflow would run.
 
 ## Bootstrapping a new repo
 

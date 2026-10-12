@@ -32,3 +32,8 @@ def test_dependabot_config_matches_template():
 def test_dependabot_automerge_matches_template():
     checked_in = (REPO_ROOT / ".github" / "workflows" / "dependabot-automerge.yml").read_text()
     assert checked_in == init.render_automerge()
+
+
+def test_release_workflow_matches_template():
+    checked_in = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    assert checked_in == init.render_release()

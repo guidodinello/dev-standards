@@ -1,5 +1,6 @@
 # Keeps templates/ in sync when Dependabot bumps a pin in this repo's own
-# checked-in .pre-commit-config.yaml or workflow files. Dependabot's
+# checked-in .pre-commit-config.yaml or workflow files (including release.yml,
+# which exists here only so Dependabot sees the SHA pins in its template). Dependabot's
 # pre-commit/github-actions ecosystems only scan those checked-in files —
 # they don't know templates/ exists, so a bump there never reaches the
 # template it was rendered from, and tests/test_self_host.py goes red on
@@ -21,6 +22,7 @@ on:
       - ".pre-commit-config.yaml"
       - ".github/workflows/ci.yml"
       - ".github/workflows/dependabot-automerge.yml"
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
