@@ -391,6 +391,32 @@ def sync_ci_runners(org: str, repo: str, repo_cfg: dict, apply: bool) -> bool:
     return True
 
 
+def sync_fork_pr_approval(org: str, repo: str, defaults: dict, repo_cfg: dict, apply: bool) -> bool:
+    """Audits/applies "Approval for running fork pull request workflows from
+    contributors" (see docs/github-standard.md § The baseline). Public repos only:
+    private repos govern fork PR workflows through a separate policy
+    (fork-pr-workflows-private-repos) that this script doesn't manage, so they're
+    skipped — not an error, not drift."""
+    actions = deep_merge(defaults["actions"], repo_cfg.get("actions_overrides", {}))
+    intended = actions["fork_pr_contributor_approval"]
+    repo_obj = gh_api_obj(f"repos/{org}/{repo}")
+    if repo_obj.get("private", True):
+        log_info(f"{repo} fork PR approval — private repo, skipped (public-only setting)")
+        return False
+
+    path = f"repos/{org}/{repo}/actions/permissions/fork-pr-contributor-approval"
+    current = gh_api_obj(path).get("approval_policy")
+    if current == intended:
+        log_info(f"{repo} fork PR approval — up to date")
+        return False
+
+    log_warn(f"{repo} fork PR approval — drift: config={intended!r} GitHub={current!r}")
+    if apply:
+        gh_api(path, method="PUT", body={"approval_policy": intended})
+        log_info(f"{repo} fork PR approval — applied")
+    return True
+
+
 def sync_ruleset(
     org: str, repo: str, defaults: dict, profiles: dict, repo_cfg: dict, apply: bool
 ) -> bool:
@@ -488,7 +514,8 @@ def main() -> int:
             if get_repo_tier(profiles, repo_cfg) == "ruleset":
                 c3 = sync_ruleset(org, repo, defaults, profiles, repo_cfg, args.apply)
             c4 = sync_ci_runners(org, repo, repo_cfg, args.apply)
-            if c1 or c2 or c3 or c4:
+            c5 = sync_fork_pr_approval(org, repo, defaults, repo_cfg, args.apply)
+            if c1 or c2 or c3 or c4 or c5:
                 any_changed = True
         except GhApiError as e:
             any_failed = True
