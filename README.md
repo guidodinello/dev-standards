@@ -60,8 +60,8 @@ cp github-standard.example.json github-standard.json   # fill in your real repos
 ./github-standard.py --apply                             # write
 ```
 
-A declarative baseline (repo settings, security features, branch rulesets) plus an
-idempotent audit/apply script. Full rationale: [docs/github-standard.md](docs/github-standard.md).
+A declarative baseline (repo settings, security features, Actions fork PR approval,
+branch rulesets) plus an idempotent audit/apply script. Full rationale: [docs/github-standard.md](docs/github-standard.md).
 
 `github-standard.json` is gitignored — it necessarily names your real repos and org.
 `github-standard.example.json` documents the schema with placeholder data.

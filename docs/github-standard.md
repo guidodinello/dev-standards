@@ -1,8 +1,8 @@
 # GitHub repo config standardization
 
 `github-standard.py` applies a consistent baseline — repo settings, security
-features, and a branch ruleset — across a set of GitHub repos, reading a declarative
-JSON config as the source of truth. Dry run by default.
+features, Actions fork PR approval, and a branch ruleset — across a set of GitHub
+repos, reading a declarative JSON config as the source of truth. Dry run by default.
 
 ```bash
 ./github-standard.py                  # audit every repo in the config, report drift
@@ -44,6 +44,25 @@ Applied to every repo, regardless of profile:
 - Secret scanning + push protection **on public repos only** — these need GitHub
   Advanced Security on private repos and the API call errors without it, so the
   script checks `private` and skips the PATCH entirely rather than failing.
+- Actions "Approval for running fork pull request workflows from contributors" set to
+  `all_external_contributors` (`defaults.actions.fork_pr_contributor_approval`;
+  override per repo with `actions_overrides`) — **public repos only**, see below.
+
+**Fork PR approval: `all_external_contributors`, not GitHub's default.** GitHub
+defaults to `first_time_contributors`, which stops requiring approval once *one* PR
+from an author has been merged. A fork `pull_request` run executes the PR's own,
+possibly modified, workflow files, so "land a harmless first PR, then open one with a
+malicious CI change" gets free runner compute (crypto mining, network probing) with
+no one approving it. Secrets aren't passed to fork runs and `GITHUB_TOKEN` is
+read-only, so the risk is compute abuse, not secret theft; `pull_request_target` is
+unaffected either way, since it always runs the base branch's workflow file. GitHub
+added first-time-contributor approval in 2021 in response to exactly this kind of
+crypto-mining abuse; requiring approval for every external contributor closes the
+"second PR" gap it leaves. The setting
+([GitHub docs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository))
+only governs public repos — private repos have a separate fork-PR-workflow policy
+(`fork-pr-workflows-private-repos`) that this script doesn't manage, so it logs the
+skip and moves on rather than reporting drift.
 
 Repos on any profile but `hobby` additionally get a branch ruleset (rulesets, not
 classic branch protection — GitHub's newer, evaluatable mechanism):

@@ -14,6 +14,10 @@
       "automated_security_fixes": true,
       "secret_scanning": "public-only"
     },
+    "actions": {
+      "_comment": "fork_pr_contributor_approval is public-only: private repos are skipped (their fork PR workflows are a separate, unmanaged policy). Override per repo via actions_overrides. See docs/github-standard.md § The baseline for why it isn't GitHub's first_time_contributors default.",
+      "fork_pr_contributor_approval": "all_external_contributors"
+    },
     "ruleset": {
       "target": "branch",
       "enforcement": "active",
@@ -137,6 +141,10 @@
       }
     },
     "my-oss-project": {
+      "_comment": "Example override: a project with many regular outside contributors may relax fork PR approval to first-time contributors only, accepting that anyone with one merged PR then runs CI unreviewed.",
+      "actions_overrides": {
+        "fork_pr_contributor_approval": "first_time_contributors"
+      },
       "branches": {
         "main": {
           "profile": "oss"

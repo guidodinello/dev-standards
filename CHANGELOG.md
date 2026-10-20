@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial project bootstrap with dev-standards baseline
+- `github-standard.py` manages the Actions "Approval for running fork pull request workflows from contributors" setting on public repos (`defaults.actions.fork_pr_contributor_approval`, default `all_external_contributors`, per-repo `actions_overrides`); private repos are skipped
 
 ## [0.1.0] - YYYY-MM-DD
 

@@ -238,3 +238,65 @@ def test_example_config_pins_ci_integration_id():
     branches = example["repos"]["my-repo-with-ci"]["branches"]
     rule = branches["main"]["extra_rules"][0]
     assert rule["parameters"]["required_status_checks"] == [PINNED]
+
+
+FORK_PATH = "repos/o/r/actions/permissions/fork-pr-contributor-approval"
+ACTIONS_DEFAULTS = {"actions": {"fork_pr_contributor_approval": "all_external_contributors"}}
+
+
+def _fake_gh_api(monkeypatch, *, private: bool, current_policy: str) -> list[tuple]:
+    """Routes gh_api by path and records every call, so a test can assert which
+    endpoints were hit and what (if anything) was written."""
+    calls: list[tuple] = []
+
+    def fake(path, method="GET", body=None, allow_404=False):
+        calls.append((method, path, body))
+        if path == "repos/o/r":
+            return {"private": private}
+        if path == FORK_PATH and method == "GET":
+            return {"approval_policy": current_policy}
+        return {}
+
+    monkeypatch.setattr(gh, "gh_api", fake)
+    return calls
+
+
+def test_fork_pr_approval_applies_default_on_public_repo(monkeypatch):
+    calls = _fake_gh_api(monkeypatch, private=False, current_policy="first_time_contributors")
+    assert gh.sync_fork_pr_approval("o", "r", ACTIONS_DEFAULTS, {}, apply=True) is True
+    puts = [c for c in calls if c[0] == "PUT"]
+    assert puts == [("PUT", FORK_PATH, {"approval_policy": "all_external_contributors"})]
+
+
+def test_fork_pr_approval_dry_run_reports_drift_without_writing(monkeypatch):
+    calls = _fake_gh_api(monkeypatch, private=False, current_policy="first_time_contributors")
+    assert gh.sync_fork_pr_approval("o", "r", ACTIONS_DEFAULTS, {}, apply=False) is True
+    assert not [c for c in calls if c[0] != "GET"]
+
+
+def test_fork_pr_approval_skips_private_repo(monkeypatch):
+    """Private repos use a separate, unmanaged fork-PR policy: the endpoint is never
+    touched, and the skip isn't drift."""
+    calls = _fake_gh_api(monkeypatch, private=True, current_policy="first_time_contributors")
+    assert gh.sync_fork_pr_approval("o", "r", ACTIONS_DEFAULTS, {}, apply=True) is False
+    assert all(path != FORK_PATH for _, path, _ in calls)
+
+
+def test_fork_pr_approval_repo_override_wins(monkeypatch):
+    calls = _fake_gh_api(monkeypatch, private=False, current_policy="all_external_contributors")
+    repo_cfg = {"actions_overrides": {"fork_pr_contributor_approval": "first_time_contributors"}}
+    assert gh.sync_fork_pr_approval("o", "r", ACTIONS_DEFAULTS, repo_cfg, apply=True) is True
+    puts = [c for c in calls if c[0] == "PUT"]
+    assert puts == [("PUT", FORK_PATH, {"approval_policy": "first_time_contributors"})]
+
+
+def test_fork_pr_approval_noop_when_already_matching(monkeypatch):
+    calls = _fake_gh_api(monkeypatch, private=False, current_policy="all_external_contributors")
+    assert gh.sync_fork_pr_approval("o", "r", ACTIONS_DEFAULTS, {}, apply=True) is False
+    assert not [c for c in calls if c[0] != "GET"]
+
+
+def test_example_config_requires_approval_for_all_external_contributors():
+    example = json.loads((REPO_ROOT / "github-standard.example.json").read_text())
+    actions = example["defaults"]["actions"]
+    assert actions["fork_pr_contributor_approval"] == "all_external_contributors"
