@@ -12,21 +12,41 @@
 # Note: a floating range (e.g. `ruff>=0.8.0`) already permits any newer
 # version, so Dependabot has nothing to bump there and won't open a PR
 # — this only helps once a dependency is actually pinned/bounded.
+#
+# Two supply-chain defaults, both kept because automerge.yml merges every
+# patch/minor version-update PR without a human:
+#
+# - `cooldown: default-days: 7`: Dependabot proposes a version only once it
+#   has been public for 7 days, so a hijacked release is usually caught and
+#   yanked before it reaches an auto-merged PR. Security updates are never
+#   delayed (cooldown applies to version updates only, per GitHub's docs).
+# - `update-types: [minor, patch]` on the dependency group: a major lands as
+#   its own PR instead of inside the group, so one breaking major (e.g. a
+#   TypeScript release a lint plugin doesn't support yet) can't hold every
+#   safe patch hostage, and majors stay out of auto-merge. Only on the
+#   SemVer ecosystems; GitHub Actions and pre-commit get the cooldown alone.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       dependencies:
         patterns:
           - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: pre-commit
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       pre-commit-hooks:
         patterns:
@@ -36,6 +56,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns:

@@ -187,7 +187,10 @@ cp templates/dependabot/automerge.yml  <repo>/.github/workflows/dependabot-autom
 ```
 
 Version-update PRs (pip + pre-commit hook revs + GitHub Actions pins, weekly),
-auto-merged when patch/minor and left for manual review on major. Distinct from the
+auto-merged when patch/minor and left for manual review on major. Each version waits
+7 days after release before Dependabot proposes it (`cooldown`), and majors arrive as
+their own PRs instead of inside the group; security updates are never delayed.
+Distinct from the
 vulnerability-alert/automated-security-fix settings `github-standard.py` already
 turns on via the API — those are security-only; this is routine currency. Needs
 `allow_auto_merge: true` at the repo level, already in the baseline settings.
