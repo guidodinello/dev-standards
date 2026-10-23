@@ -153,6 +153,12 @@ the repo's `ci.yml` has the aggregate job, otherwise the per-job contexts plus a
 hint to adopt it. Treat the config as authoritative afterward; don't regenerate it
 from CI on every run. A repo's CI must gain the `CI` job *before* its ruleset
 switches to requiring it, or every PR blocks on a check that never reports.
+The order is: (1) merge the PR that adds the `CI` job to the repo's `ci.yml` and
+let it report green on its default branch; (2) `./init.py <repo> --checks`
+(the repo needs an entry in `github-standard.json` first — add a bare
+`{"profile": "baseline"}` if it has none); (3) edit that entry in the local,
+gitignored `github-standard.json` — not a PR; (4) `./github-standard.py <repo>`
+as a dry run, review it, then `--apply`.
 
 ## No upsert — match by name, never blind-create
 
@@ -298,7 +304,10 @@ adds a `{"profile": "baseline"}` entry to `github-standard.json`, and delegates
 to `github-standard.py --apply` in one step. Then, once CI has gone green at
 least once, `./init.py <repo> --checks` prints the `required_status_checks`
 snippet to merge in by hand (the single `CI` context pinned with
-`integration_id` 15368 — see § Required checks above).
+`integration_id` 15368 — see § Required checks above). That edit goes into your
+local, gitignored `github-standard.json`: there is no PR for it, so make it in the
+checkout you run `./github-standard.py` from (keep that checkout on current `main`,
+or the script and `github-standard.example.json` it audits against will be stale).
 
 For a scratch repo (`hobby`, no ruleset) or one that doesn't fit the Python
 templates (an `"oss"`/`"flagship"` shape, or a different language entirely),

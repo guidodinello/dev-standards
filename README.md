@@ -46,7 +46,9 @@ context has to be read off a real CI run and hand-confirmed (see
 once CI has gone green at least once; it prints the single `CI` context pinned
 with `integration_id` 15368 (or the per-job contexts plus a hint, if the repo's CI
 lacks the aggregate job) to paste rather than writing it, since the JSON entry is by then a nested structure this
-script won't touch automatically.
+script won't touch automatically. You paste it into your local, gitignored
+`github-standard.json` — there is no PR for that step, and `--checks` needs the repo's
+entry to exist already (it refuses an unregistered repo).
 
 The manual `cp` recipes below still work and are what `init.py` runs under
 the hood — reach for them if you're adopting only one piece, or on a non-Python
