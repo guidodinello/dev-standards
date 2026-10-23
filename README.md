@@ -12,7 +12,7 @@ bootstrap time and never re-applies itself to a repo later, so picking up templa
 changes there is a manual re-run, not automatic.
 
 Because Dependabot only scans checked-in files, its version bumps (a
-`pre-commit-hooks` rev, a `checkout@vN` pin) never reach the `templates/` copy
+`pre-commit-hooks` rev, a `checkout` SHA pin) never reach the `templates/` copy
 they were rendered from, which `tests/test_self_host.py` then catches as
 drift. `.github/workflows/sync-self-host-templates.yml` runs `sync_self_host.py`
 on Dependabot's own PRs to propagate the bump automatically (reusing the same
@@ -118,7 +118,7 @@ repo, and it only runs `dependabot/fetch-metadata` and `gh`, both of which work 
 the homelab runner (`gh` and the actions' bundled node ship with the runner install).
 An offline self-hosted runner just delays this job rather than blocking a merge —
 `auto-merge` isn't in any repo's `required_status_checks`, and the job's own
-`if: github.actor == 'dependabot[bot]'` already keeps human and fork PRs off it.
+`if: github.event.pull_request.user.login == 'dependabot[bot]'` already keeps human and fork PRs off it.
 
 Point CI at the homelab HP:
 
@@ -187,7 +187,8 @@ cp templates/dependabot/automerge.yml  <repo>/.github/workflows/dependabot-autom
 ```
 
 Version-update PRs (pip + pre-commit hook revs + GitHub Actions pins, weekly),
-auto-merged when patch/minor and left for manual review on major. Each version waits
+auto-merged when patch/minor and left for manual review on major and for every
+GitHub Actions bump (SHA pins, see `docs/github-standard.md` § Supply chain). Each version waits
 7 days after release before Dependabot proposes it (`cooldown`), and majors arrive as
 their own PRs instead of inside the group; security updates are never delayed.
 Distinct from the

@@ -186,7 +186,7 @@ misleading per-repo 403s.
 hook revs, GitHub Actions pins, weekly), `npm.yml` (version updates for npm/pnpm/yarn
 repos, plus a `security-updates` group so every currently-fixable vulnerability alert
 lands as one PR instead of one per CVE — see the file's own header for why), and
-`automerge.yml` (patch/minor auto-merge, major stays manual; ecosystem-agnostic, works
+`automerge.yml` (patch/minor auto-merge, major and github-actions bumps stay manual; ecosystem-agnostic, works
 as-is for either language template). The version-update groups are distinct from the
 vulnerability-alert/automated-security-fix *settings* this script already manages via
 the API — those settings control whether Dependabot acts at all; the templates control
@@ -221,6 +221,16 @@ One-time setup (the App can be shared across every repo that uses this template)
    Dependabot-triggered workflow can't read Actions secrets) → add `AUTOMERGE_APP_ID`
    and `AUTOMERGE_APP_PRIVATE_KEY` (the full `.pem` contents)
 
+**github-actions bumps are never auto-merged.** Workflows are SHA-pinned (see
+[Supply chain](#supply-chain)), so every patch/minor release of an action becomes a PR.
+Auto-merging those would be an unreviewed path into code that runs on the CI runner
+pool, and merging a PR that edits `.github/workflows/` with an App token likely also
+needs the `workflows: write` permission, which is untested. `automerge.yml` skips them
+(reporting why in the job summary); review the weekly grouped actions PR by hand. The
+mint step requests only `contents: write` and `pull-requests: write` via `permission-*`
+inputs, and the job gates on the PR author (`github.event.pull_request.user.login`), not
+`github.actor`.
+
 Without the App configured, `automerge.yml` degrades gracefully — it detects the
 missing secret, reports "not configured" in the job summary, and leaves the PR for a
 manual merge (which does trigger a deploy). It doesn't fail loudly, so a repo adopting
@@ -253,18 +263,31 @@ truco-py) doesn't, and doesn't adopt `templates/release/release.yml`.
   letter or `-` is marked pre-release). `contents: write` is granted to that one job
   only. A failed verification publishes nothing: fix it, delete the tag
   (`git push origin :refs/tags/vX.Y.Z`), and re-tag.
-- **Supply chain:** the release workflow is the one with `contents: write`, so its
-  actions are SHA-pinned (tag as a trailing comment) and checkout uses
-  `persist-credentials: false`, keeping the token out of `.git/config` for the build
-  step. In adopters, Dependabot's `github-actions` ecosystem (already in
-  `templates/dependabot/python.yml` and `npm.yml`) keeps the SHA pins updated. The
-  template copy here is kept current the same way: a checked-in
-  `.github/workflows/release.yml` exists only so Dependabot scans it, and
-  `sync_self_host.py` propagates its bumps (SHA and tag comment) into the template.
+- **Supply chain:** see [Supply chain](#supply-chain). The release workflow holds
+  `contents: write`; its checked-in `.github/workflows/release.yml` exists only so
+  Dependabot scans it, and `sync_self_host.py` propagates its bumps (SHA and tag
+  comment) into the template.
 - **Adopting:** `./init.py <repo> --release` adds the workflow for a Python repo; for
   JS repos `cp templates/release/release.yml` and swap the toolchain step and the two
   env values as the template's comments show. It is opt-in and not part of the default
   bootstrap.
+
+## Supply chain
+
+Every action in every workflow is pinned to a full commit SHA with the tag as a trailing
+comment (`uses: actions/checkout@<sha> # v7`), and every `actions/checkout` sets
+`persist-credentials: false`. CI's token is read-only, but the runner pool is switchable
+(`CI_RUNNERS`) and may be self-hosted, so a hijacked tag would still execute code there.
+Dependabot's `github-actions` ecosystem keeps SHA and comment in step, and its PRs are
+reviewed by hand (see [Dependabot](#dependabot)). `tests/test_init.py` fails if any
+rendered or checked-in workflow has an unpinned `uses:` or a checkout that persists
+credentials.
+
+`templates/ci/python-ci.yml` includes an **advisory** `Audit workflows (advisory)` job
+running a pinned `zizmor`. It is deliberately outside the `CI` job's `needs:` and its
+step is `continue-on-error`, so findings never block a merge. Move it to blocking once it
+has run clean for a few weeks; bump its pinned version by hand (Dependabot does not track
+`uvx` pins).
 
 ## Adding a new repo
 

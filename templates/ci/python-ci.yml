@@ -16,6 +16,10 @@
 # it needs failed or was cancelled, so a new job only needs adding to its
 # `needs:` list.
 #
+# Every action is SHA-pinned (tag as a trailing comment) and checkout drops its
+# credentials; the advisory zizmor job audits that. See docs/github-standard.md
+# § Supply chain.
+#
 # Deliberately not in this baseline (add per repo if wanted): `uv sync
 # --locked` (init.py --locked), and an actionlint job (docker:// needs Docker
 # on the runner, which would turn a Docker-less self-hosted runner into a
@@ -66,9 +70,11 @@ jobs:
     # See dev-standards' README § CI runners for the commands.
     runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -88,13 +94,38 @@ jobs:
       - name: ruff lint
         run: uv run ruff check .
 
+  # Advisory: audits the workflow files with zizmor. Not in the `CI` job's needs:
+  # list and continue-on-error on the step, so findings never block a merge. The
+  # version is pinned so a new upstream audit cannot turn this red between runs;
+  # Dependabot does not bump a `uvx` pin, so bump it by hand. Make it blocking
+  # (drop continue-on-error, add to needs:) once it has run clean for a few weeks.
+  # GH_TOKEN is the read-only workflow token; it enables the online audits that
+  # check each pinned SHA really belongs to the tagged repo.
+  audit-workflows:
+    name: Audit workflows (advisory)
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+
+      - name: zizmor
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uvx zizmor@1.31.1 --format=github .github/workflows
+
   test-python:
     name: Tests (Python)
     runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
