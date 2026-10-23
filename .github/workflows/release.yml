@@ -118,6 +118,9 @@ jobs:
           fi
 
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          # This job holds contents: write; never restore a cache a PR could have poisoned.
+          enable-cache: false
 
       - name: Build artifacts
         run: bash -c "$BUILD_COMMAND"

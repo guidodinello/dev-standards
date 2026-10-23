@@ -56,7 +56,7 @@ def test_render_ci_keeps_ci_runners_switch():
     future template edit — without it, every repo rendered from this template loses
     its ability to route CI off GitHub-hosted runners (see README § CI runners)."""
     rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=True)
-    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 3
+    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 4
 
 
 def test_render_automerge_keeps_ci_runners_switch():
@@ -97,7 +97,7 @@ def test_render_ci_without_tests_keeps_aggregate_job_without_dangling_need():
     rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=False)
     assert _ci_needs(rendered) == ["lint-python"]
     assert "test-python" not in rendered
-    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 2
+    assert rendered.count("fromJSON(vars.CI_RUNNERS") == 3
 
 
 AGGREGATE_WF = (REPO_ROOT / "templates" / "ci" / "python-ci.yml").read_text()
@@ -176,22 +176,70 @@ def test_release_template_gates_publish_on_verification():
     assert "--verify-tag" in text
 
 
-def test_release_template_pins_every_action_to_a_sha():
+def _workflow_texts():
+    texts = {
+        "ci": init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=True),
+        "ci-no-tests": init.render_ci(
+            install_cmd="uv sync --dev", branch="main", include_tests=False
+        ),
+        "automerge": init.render_automerge(),
+        "release": init.render_release(),
+    }
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        texts[f"checked-in {path.name}"] = path.read_text()
+    return texts
+
+
+WORKFLOWS = _workflow_texts()
+
+
+@pytest.mark.parametrize("name", WORKFLOWS)
+def test_every_action_is_pinned_to_a_sha(name):
     uses = [
         line.strip()
-        for line in init.render_release().splitlines()
+        for line in WORKFLOWS[name].splitlines()
         if "uses:" in line and not line.lstrip().startswith("#")
     ]
     assert uses
     for line in uses:
-        assert re.fullmatch(r"- uses: \S+@[0-9a-f]{40} # v\d.*", line), line
+        assert re.fullmatch(r"(- )?uses: \S+@[0-9a-f]{40} # v\d.*", line), line
 
 
-def test_release_checkout_does_not_persist_credentials():
+@pytest.mark.parametrize("name", WORKFLOWS)
+def test_every_checkout_does_not_persist_credentials(name):
+    text = WORKFLOWS[name]
+    steps = text.split("actions/checkout@")[1:]
+    for step in steps:
+        # the step's own block runs to the next blank line or the next list item
+        block = re.split(r"\n\s*\n|\n\s*- ", step)[0]
+        assert "persist-credentials: false" in block, block
+
+
+def test_release_checkout_fetches_full_history():
     text = init.render_release()
     step = text[text.index("actions/checkout@") :].split("\n\n")[0]
-    assert "persist-credentials: false" in step
     assert "fetch-depth: 0" in step  # the on-default-branch check needs full history
+
+
+@pytest.mark.parametrize("include_tests", [True, False])
+def test_ci_audit_job_survives_render_and_is_not_required(include_tests):
+    text = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=include_tests)
+    assert "  audit-workflows:\n" in text
+    ci_job = text[text.index("\n  ci:\n") :]
+    needs = ci_job[: ci_job.index("if: always()")]
+    assert "audit-workflows" not in needs
+    zizmor_step = text[text.index("name: zizmor") :]
+    assert "continue-on-error: true" in zizmor_step.split("run:")[0]
+
+
+def test_automerge_policy():
+    text = init.render_automerge()
+    assert "if: github.event.pull_request.user.login == 'dependabot[bot]'" in text
+    assert "if: github.actor" not in text
+    assert "permission-contents: write" in text
+    assert "permission-pull-requests: write" in text
+    merge = text[text.index("- name: Auto-merge patch and minor updates") :].split("run:")[0]
+    assert "package-ecosystem != 'github_actions'" in merge
 
 
 def test_release_flag_parses(monkeypatch):

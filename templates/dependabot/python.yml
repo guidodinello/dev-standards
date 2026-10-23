@@ -14,7 +14,8 @@
 # — this only helps once a dependency is actually pinned/bounded.
 #
 # Two supply-chain defaults, both kept because automerge.yml merges every
-# patch/minor version-update PR without a human:
+# patch/minor version-update PR without a human (except github-actions bumps,
+# which are SHA-pin updates reviewed by hand):
 #
 # - `cooldown: default-days: 7`: Dependabot proposes a version only once it
 #   has been public for 7 days, so a hijacked release is usually caught and
