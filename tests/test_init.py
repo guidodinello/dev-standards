@@ -61,7 +61,7 @@ def test_render_ci_keeps_ci_runners_switch():
 
 def test_render_automerge_keeps_ci_runners_switch():
     """Same guard as test_render_ci_keeps_ci_runners_switch, for the auto-merge
-    template: without it, auto-merge stays pinned to ubuntu-latest and keeps
+    template: without it, auto-merge stays pinned to GitHub-hosted runners and keeps
     failing on private repos where GitHub-hosted minutes are billing-blocked
     (see README § CI runners)."""
     rendered = init.render_automerge()

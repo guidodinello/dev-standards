@@ -105,17 +105,22 @@ sdist via `uv build`; JS/extension: a `BUILD_COMMAND`/`ARTIFACTS` hook), with
 `CI_RUNNERS` repo variable to pick where their jobs run:
 
 ```yaml
-runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-26.04"]') }}
 ```
 
-Unset means GitHub-hosted `ubuntu-latest` — the default, no action needed. This exists
+Unset means GitHub-hosted `ubuntu-26.04` — the default, no action needed. The image is
+pinned rather than `ubuntu-latest` so a GitHub label migration (like the gradual
+24.04 → 26.04 one in
+[runner-images#14748](https://github.com/actions/runner-images/issues/14748)) can't
+silently swap the OS under some jobs and not others. Dependabot doesn't bump runner
+labels, so moving to a newer image is a deliberate PR here. This variable exists
 because a **private** repo's free GitHub-hosted minutes run out, and every job then
 refuses to start with "recent account payments have failed or your spending limit
 needs to be increased" (hit on `truco`). A public repo has unlimited free minutes and
 needs none of this.
 
 `automerge.yml` follows the same variable rather than staying pinned to
-`ubuntu-latest`: the billing block hits it exactly like any other job on a private
+a GitHub-hosted image: the billing block hits it exactly like any other job on a private
 repo, and it only runs `dependabot/fetch-metadata` and `gh`, both of which work on
 the homelab runner (`gh` and the actions' bundled node ship with the runner install).
 An offline self-hosted runner just delays this job rather than blocking a merge —

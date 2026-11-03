@@ -66,9 +66,9 @@ jobs:
     # CI_RUNNERS repo variable to a JSON array of runner labels — e.g.
     # ["self-hosted","linux","x64"] — to route CI off GitHub-hosted runners
     # when their minutes are unavailable (on a private repo, exhausting the
-    # free tier makes every job refuse to start). Unset means ubuntu-latest.
+    # free tier makes every job refuse to start). Unset means ubuntu-26.04.
     # See dev-standards' README § CI runners for the commands.
-    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-26.04"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -103,7 +103,7 @@ jobs:
   # check each pinned SHA really belongs to the tagged repo.
   audit-workflows:
     name: Audit workflows (advisory)
-    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-26.04"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -119,7 +119,7 @@ jobs:
 
   test-python:
     name: Tests (Python)
-    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-26.04"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -147,7 +147,7 @@ jobs:
       - lint-python
       - test-python
     if: always()
-    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-26.04"]') }}
     steps:
       - name: Check results
         env:

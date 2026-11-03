@@ -40,7 +40,7 @@ jobs:
   release:
     name: Release
     # Same runner switch as CI — see dev-standards' README § CI runners.
-    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-26.04"]') }}
     permissions:
       contents: write
     env:

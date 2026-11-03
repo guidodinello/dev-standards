@@ -25,7 +25,7 @@ jobs:
     # a private repo's GitHub-hosted minutes running out blocks this job exactly like
     # any other, and it isn't a required check, so an offline self-hosted runner only
     # delays a merge rather than blocking one.
-    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-26.04"]') }}
     # The PR author, not github.actor: actor is whoever triggered this run (a human
     # re-running the job becomes the actor), the PR author cannot be changed.
     if: github.event.pull_request.user.login == 'dependabot[bot]'
