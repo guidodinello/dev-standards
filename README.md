@@ -188,7 +188,7 @@ cp templates/dependabot/python.yml     <repo>/.github/dependabot.yml
 cp templates/dependabot/automerge.yml  <repo>/.github/workflows/dependabot-automerge.yml
 ```
 
-Version-update PRs (pip + pre-commit hook revs + GitHub Actions pins, weekly),
+Version-update PRs (uv + pre-commit hook revs + GitHub Actions pins, weekly),
 auto-merged when patch/minor and left for manual review on major and for every
 GitHub Actions bump (SHA pins, see `docs/github-standard.md` § Supply chain). Each version waits
 7 days after release before Dependabot proposes it (`cooldown`), and majors arrive as
