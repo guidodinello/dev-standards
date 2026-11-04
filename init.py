@@ -247,8 +247,11 @@ _NO_TESTS_COMMENT = (
 )
 
 
-def render_ci(*, install_cmd: str, branch: str, include_tests: bool) -> str:
+def render_ci(*, version: str, install_cmd: str, branch: str, include_tests: bool) -> str:
     text = (TEMPLATES / "ci" / "python-ci.yml").read_text()
+    # Same version render_pre_commit writes into language_version — the lint
+    # job's venv must run it or pre-commit can't build that hook's env.
+    text = _must_replace(text, 'python-version: "3.13"', f'python-version: "{version}"')
 
     resolved_install = f"      - name: Install dependencies\n        run: {install_cmd}"
     text = _must_replace(text, _FIXME_INSTALL_BLOCK, resolved_install)
@@ -313,7 +316,7 @@ def rendered_files(
     files = {
         out_root / ".pre-commit-config.yaml": render_pre_commit(version),
         out_root / ".github" / "workflows" / "ci.yml": render_ci(
-            install_cmd=install_cmd, branch=branch, include_tests=include_tests
+            version=version, install_cmd=install_cmd, branch=branch, include_tests=include_tests
         ),
         out_root / ".github" / "dependabot.yml": render_dependabot(),
         out_root / ".github" / "workflows" / "dependabot-automerge.yml": render_automerge(),
@@ -422,10 +425,13 @@ def print_checklist(org: str, repo: str, *, docs_present: bool) -> None:
             "automerge.yml degrades to a green 'not configured' summary and PRs "
             "wait for manual merge. See docs/github-standard.md § Dependabot to set up the App."
         )
-    log_warn("  - Confirm ruff and pytest are real dev dependencies, not just pre-commit hook envs")
     log_warn(
-        '    (otherwise CI fails with "Failed to spawn: `ruff`" even though '
-        "pre-commit works locally)."
+        "  - Confirm ruff, pytest and pre-commit are real dev dependencies, "
+        "not just pre-commit hook envs or a global install"
+    )
+    log_warn(
+        '    (otherwise CI fails with "Failed to spawn: `ruff`" or `pre-commit` '
+        "even though they work locally)."
     )
     if docs_present:
         log_warn(

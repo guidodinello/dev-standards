@@ -20,7 +20,7 @@ def test_pre_commit_config_matches_template():
 def test_ci_workflow_matches_template():
     checked_in = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert checked_in == init.render_ci(
-        install_cmd="uv sync --dev", branch="main", include_tests=True
+        version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=True
     )
 
 
