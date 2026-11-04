@@ -88,6 +88,15 @@ jobs:
       - name: ruff lint
         run: uv run ruff check .
 
+      # Runs the whole .pre-commit-config.yaml, so the hygiene hooks
+      # (end-of-file-fixer, trailing-whitespace, check-yaml/toml/json, ...) gate
+      # merges too; a hookless clone, --no-verify or the web editor skips them
+      # locally. `uv run --with` uses the project's own Python, which is what
+      # the config's language_version names. Dependabot doesn't bump this pin
+      # either; bump it by hand.
+      - name: pre-commit hooks
+        run: uv run --with pre-commit==4.7.0 pre-commit run --all-files --show-diff-on-failure
+
   # Advisory: audits the workflow files with zizmor. Not in the `CI` job's needs:
   # list and continue-on-error on the step, so findings never block a merge. The
   # version is pinned so a new upstream audit cannot turn this red between runs;
