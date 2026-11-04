@@ -2,16 +2,17 @@
 # Distinct from the vulnerability-alert/automated-security-fix settings
 # github-standard.py already turns on via the GitHub API — those are
 # security-only patches; this is routine "keep pinned deps current" PRs
-# on a schedule, for three ecosystems: your actual dependencies (pip),
+# on a schedule, for three ecosystems: your actual dependencies (uv),
 # your CI Actions pins, and your pre-commit hook revs.
 #
 # Adopt: cp to .github/dependabot.yml, adjust `directory` if the repo
 # isn't laid out with pyproject.toml at the root (see fitted's
 # .github/dependabot.yml for the monorepo/multi-directory shape).
 #
-# Note: a floating range (e.g. `ruff>=0.8.0`) already permits any newer
-# version, so Dependabot has nothing to bump there and won't open a PR
-# — this only helps once a dependency is actually pinned/bounded.
+# `uv`, not `pip`: the pip ecosystem reads pyproject.toml but never uv.lock,
+# so in a uv project it left every locked version stale (dev-standards had
+# no pip PR in months while uv.lock sat on an old ruff). The uv ecosystem
+# updates uv.lock too, which is what CI actually installs.
 #
 # Two supply-chain defaults, both kept because automerge.yml merges every
 # patch/minor version-update PR without a human (except github-actions bumps,
@@ -28,7 +29,7 @@
 #   SemVer ecosystems; GitHub Actions and pre-commit get the cooldown alone.
 version: 2
 updates:
-  - package-ecosystem: pip
+  - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly

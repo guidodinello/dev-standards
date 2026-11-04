@@ -188,7 +188,7 @@ misleading per-repo 403s.
 
 ## Dependabot
 
-`templates/dependabot/` has three files: `python.yml` (version updates — pip, pre-commit
+`templates/dependabot/` has three files: `python.yml` (version updates — uv (pyproject.toml + uv.lock), pre-commit
 hook revs, GitHub Actions pins, weekly), `npm.yml` (version updates for npm/pnpm/yarn
 repos, plus a `security-updates` group so every currently-fixable vulnerability alert
 lands as one PR instead of one per CVE — see the file's own header for why), and
