@@ -38,14 +38,18 @@ def test_detect_tests_requires_both_dir_and_pytest_dep_under_same_style(tmp_path
 
 
 def test_render_ci_fills_fixmes_and_strips_test_job_when_excluded():
-    rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=False)
+    rendered = init.render_ci(
+        version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=False
+    )
     assert "# <FIXME>" not in rendered
     assert "test-python" not in rendered
     assert "branches: [main]" in rendered
 
 
 def test_render_ci_keeps_test_job_when_included():
-    rendered = init.render_ci(install_cmd="uv sync --dev", branch="develop", include_tests=True)
+    rendered = init.render_ci(
+        version="3.13", install_cmd="uv sync --dev", branch="develop", include_tests=True
+    )
     assert "# <FIXME>" not in rendered
     assert "test-python" in rendered
     assert "branches: [develop]" in rendered
@@ -55,7 +59,9 @@ def test_render_ci_keeps_ci_runners_switch():
     """Guards against silently dropping the CI_RUNNERS fallback expression during a
     future template edit — without it, every repo rendered from this template loses
     its ability to route CI off GitHub-hosted runners (see README § CI runners)."""
-    rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=True)
+    rendered = init.render_ci(
+        version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=True
+    )
     assert rendered.count("fromJSON(vars.CI_RUNNERS") == 4
 
 
@@ -75,6 +81,17 @@ def test_render_pre_commit_substitutes_python_version():
     assert "python3.13" not in rendered
 
 
+def test_render_ci_runs_lint_on_the_pre_commit_python_version():
+    """The lint job's venv Python must be the one render_pre_commit writes into
+    language_version; otherwise uv picks the newest allowed Python and pre-commit
+    can't build the env of a hook pinned to python3.X (failed this way on #39)."""
+    rendered = init.render_ci(
+        version="3.11", install_cmd="uv sync --dev", branch="main", include_tests=True
+    )
+    assert 'python-version: "3.11"' in rendered
+    assert "python3.11" in init.render_pre_commit("3.11")
+
+
 def test_main_requires_repo_argument(monkeypatch):
     monkeypatch.setattr("sys.argv", ["init.py"])
     with pytest.raises(SystemExit):
@@ -88,13 +105,17 @@ def _ci_needs(rendered: str) -> list[str]:
 
 
 def test_render_ci_aggregate_job_needs_every_job():
-    rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=True)
+    rendered = init.render_ci(
+        version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=True
+    )
     assert _ci_needs(rendered) == ["lint-python", "test-python"]
     assert "if: always()" in rendered
 
 
 def test_render_ci_without_tests_keeps_aggregate_job_without_dangling_need():
-    rendered = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=False)
+    rendered = init.render_ci(
+        version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=False
+    )
     assert _ci_needs(rendered) == ["lint-python"]
     assert "test-python" not in rendered
     assert rendered.count("fromJSON(vars.CI_RUNNERS") == 3
@@ -178,9 +199,11 @@ def test_release_template_gates_publish_on_verification():
 
 def _workflow_texts():
     texts = {
-        "ci": init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=True),
+        "ci": init.render_ci(
+            version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=True
+        ),
         "ci-no-tests": init.render_ci(
-            install_cmd="uv sync --dev", branch="main", include_tests=False
+            version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=False
         ),
         "automerge": init.render_automerge(),
         "release": init.render_release(),
@@ -223,7 +246,9 @@ def test_release_checkout_fetches_full_history():
 
 @pytest.mark.parametrize("include_tests", [True, False])
 def test_ci_audit_job_survives_render_and_is_not_required(include_tests):
-    text = init.render_ci(install_cmd="uv sync --dev", branch="main", include_tests=include_tests)
+    text = init.render_ci(
+        version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=include_tests
+    )
     assert "  audit-workflows:\n" in text
     ci_job = text[text.index("\n  ci:\n") :]
     needs = ci_job[: ci_job.index("if: always()")]

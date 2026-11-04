@@ -10,6 +10,7 @@ package = false
 
 [dependency-groups]
 dev = [
+  "pre-commit>=4.7",
   "pytest>=8.0",
   "ruff>=0.13",
 ]

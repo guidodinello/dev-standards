@@ -27,10 +27,11 @@
 #
 # Before the first push, check the target repo actually has what this
 # workflow assumes — two gaps found rolling this out the first time:
-#   - `ruff`/`pytest` must be in the project's own dev dependency group.
-#     A repo that only runs ruff through pre-commit's isolated hook env
-#     doesn't have it on `uv sync --dev`'s PATH; CI fails with
-#     "Failed to spawn: `ruff`" even though pre-commit works fine locally.
+#   - `ruff`/`pytest`/`pre-commit` must be in the project's own dev dependency
+#     group. A repo that only runs ruff through pre-commit's isolated hook env
+#     (or pre-commit from a global install) doesn't have it on
+#     `uv sync --dev`'s PATH; CI fails with "Failed to spawn: `ruff`" even
+#     though pre-commit works fine locally.
 #   - ruff >=0.13 formats fenced Python code blocks inside Markdown by
 #     default. `ruff format --check .` at a repo root with a docs/ folder
 #     will try to reformat illustrative code snippets in prose. Add
@@ -78,6 +79,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          # Must match the language_version in .pre-commit-config.yaml: without
+          # it uv builds the venv on the newest Python requires-python allows,
+          # and pre-commit can't find the python3.X a hook asks for.
+          python-version: "3.13"
 
       - name: Install dependencies
         run: uv sync --dev
@@ -87,6 +92,21 @@ jobs:
 
       - name: ruff lint
         run: uv run ruff check .
+
+      # Hook envs live in ~/.cache/pre-commit, outside setup-uv's cache. The
+      # key covers the config (hook revs, language_version); pre-commit
+      # rebuilds an env whose interpreter has since changed on its own.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      # Runs the whole .pre-commit-config.yaml, so the hygiene hooks
+      # (end-of-file-fixer, trailing-whitespace, check-yaml/toml/json, ...) gate
+      # merges too; a hookless clone, --no-verify or the web editor skips them
+      # locally. pre-commit is a dev dependency, so uv.lock pins its version.
+      - name: pre-commit hooks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
 
   # Advisory: audits the workflow files with zizmor. Not in the `CI` job's needs:
   # list and continue-on-error on the step, so findings never block a merge. The
