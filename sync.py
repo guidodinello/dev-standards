@@ -10,6 +10,8 @@ shallow clone of the default branch into a temp dir. A repo without a
 `copier update` (a 3-way merge from the template commit the repo was rendered
 from to dev-standards' main HEAD), then resolves pin-only conflicts and reports:
 
+    skipped     opted out in github-standard.json (`"template_sync": {"skip":
+                "<reason>"}`); never cloned
     unchanged   the repo already matches the template
     clean       the update applies without conflicts ("answers only" when nothing
                 but `_commit` in .copier-answers.yml changed)
@@ -31,6 +33,8 @@ Usage:
     ./sync.py my-repo               # dry run, just one
     ./sync.py my-repo --apply       # open/update that repo's sync PR
     ./sync.py --config path/to/github-standard.json
+    ./sync.py adopt my-repo         # onboard a repo without .copier-answers.yml
+                                    # (dry run; --apply opens its PR): sync_adopt.py
 
 Requires: `uv` (run it from the dev-standards checkout, like init.py) and the
 `gh` CLI, authenticated for the repos' org (clones use gh's auth, so private
@@ -77,6 +81,7 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 
 
 class Status(Enum):
+    SKIPPED = "skipped"
     NOT_ONBOARDED = "not onboarded"
     UNCHANGED = "unchanged"
     CLEAN = "clean"
@@ -221,43 +226,27 @@ def _run(cmd: list[str], cwd: Path | None = None) -> str:
     return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True).stdout
 
 
+def clone(org: str, repo: str, dest: Path) -> bool:
+    """Clone `repo`'s default branch into `dest`, not checked out yet (a repo that
+    isn't onboarded needs no blobs). Returns whether it has a .copier-answers.yml."""
+    _run(clone_command(org, repo, dest))
+    probe = subprocess.run(
+        ["git", "cat-file", "-e", f"HEAD:{ANSWERS_FILE}"], cwd=dest, capture_output=True
+    )
+    return probe.returncode == 0
+
+
+def checkout(dest: Path) -> None:
+    _run(["git", "checkout", "-q"], cwd=dest)
+
+
 def sync_repo(org: str, repo: str, workdir: Path) -> Result:
     dest = workdir / repo
     try:
-        _run(clone_command(org, repo, dest))
-        probe = subprocess.run(
-            ["git", "cat-file", "-e", f"HEAD:{ANSWERS_FILE}"], cwd=dest, capture_output=True
-        )
-        if probe.returncode != 0:
+        if not clone(org, repo, dest):
             return Result(repo, Status.NOT_ONBOARDED)
-        _run(["git", "checkout", "-q"], cwd=dest)
-        base_branch = _run(["git", "symbolic-ref", "--short", "HEAD"], cwd=dest).strip()
-        base_sha = _run(["git", "rev-parse", "HEAD"], cwd=dest).strip()
-        old_answers = (dest / ANSWERS_FILE).read_text()
-        run_update(
-            str(dest),
-            defaults=True,
-            overwrite=True,
-            conflict="inline",
-            quiet=True,
-            # Decision 3 in docs/template-sync.md: sync to main HEAD, never to a tag.
-            vcs_ref="HEAD",
-        )
-        unmerged = _run(["git", "diff", "--name-only", "--diff-filter=U"], cwd=dest).split()
-        resolved_pins = []
-        conflicted = []
-        for rel in unmerged:
-            path = dest / rel
-            text, resolved, left = resolve_pin_conflicts(path.read_text())
-            path.write_text(text)
-            resolved_pins += [ResolvedPin(rel, *pin) for pin in resolved]
-            if left:
-                conflicted.append(rel)
-        _run(["git", "add", "-A"], cwd=dest)
-        diff = _run(["git", "diff", "--cached", "HEAD"], cwd=dest)
-        changed = _run(["git", "diff", "--cached", "--name-only", "HEAD"], cwd=dest).split()
-        changes, unsupported_modes = _staged_changes(dest)
-        new_answers = (dest / ANSWERS_FILE).read_text()
+        checkout(dest)
+        return update_clone(repo, dest)
     except subprocess.CalledProcessError as e:
         return Result(repo, Status.ERROR, message=(e.stderr or str(e)).strip())
     # The per-repo boundary: one repo's failure must not stop the others. Copier
@@ -267,6 +256,39 @@ def sync_repo(org: str, repo: str, workdir: Path) -> Result:
     # Exceptions: Ctrl-C still stops the run.
     except Exception as e:
         return Result(repo, Status.ERROR, message=f"{type(e).__name__}: {e}".strip())
+
+
+def update_clone(repo: str, dest: Path) -> Result:
+    """`copier update` on an onboarded, checked-out clone, pin conflicts resolved,
+    and the change staged. Raises on failure (the caller reports it). `sync.py
+    adopt` previews a first sync with it too."""
+    base_branch = _run(["git", "symbolic-ref", "--short", "HEAD"], cwd=dest).strip()
+    base_sha = _run(["git", "rev-parse", "HEAD"], cwd=dest).strip()
+    old_answers = (dest / ANSWERS_FILE).read_text()
+    run_update(
+        str(dest),
+        defaults=True,
+        overwrite=True,
+        conflict="inline",
+        quiet=True,
+        # Decision 3 in docs/template-sync.md: sync to main HEAD, never to a tag.
+        vcs_ref="HEAD",
+    )
+    unmerged = _run(["git", "diff", "--name-only", "--diff-filter=U"], cwd=dest).split()
+    resolved_pins = []
+    conflicted = []
+    for rel in unmerged:
+        path = dest / rel
+        text, resolved, left = resolve_pin_conflicts(path.read_text())
+        path.write_text(text)
+        resolved_pins += [ResolvedPin(rel, *pin) for pin in resolved]
+        if left:
+            conflicted.append(rel)
+    _run(["git", "add", "-A"], cwd=dest)
+    diff = _run(["git", "diff", "--cached", "HEAD"], cwd=dest)
+    changed = _run(["git", "diff", "--cached", "--name-only", "HEAD"], cwd=dest).split()
+    changes, unsupported_modes = _staged_changes(dest)
+    new_answers = (dest / ANSWERS_FILE).read_text()
 
     if conflicted:
         status = Status.CONFLICTS
@@ -353,12 +375,47 @@ def describe(result: Result) -> str:
     return f"{line}: {'; '.join(notes)}" if notes else line
 
 
-def load_repos(config_path: Path) -> tuple[str, list[str]]:
+def load_repos(config_path: Path) -> tuple[str, dict[str, dict]]:
+    """(org, repo name -> its github-standard.json entry), `_comment` keys dropped."""
     config = json.loads(config_path.read_text())
-    return config["org"], [name for name in config["repos"] if not name.startswith("_")]
+    return config["org"], {
+        name: entry for name, entry in config["repos"].items() if not name.startswith("_")
+    }
+
+
+def skip_reason(entry: object) -> str | None:
+    """The reason a repo opted out of template sync (`"template_sync": {"skip":
+    "<reason>"}` in its github-standard.json entry), or None. Fails closed: a
+    malformed entry raises ValueError, and the caller leaves the repo alone."""
+    if not isinstance(entry, dict) or "template_sync" not in entry:
+        return None
+    section = entry["template_sync"]
+    if not isinstance(section, dict):
+        raise ValueError("template_sync must be an object")
+    if "skip" not in section:
+        return None
+    reason = section["skip"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("template_sync.skip must be a non-empty reason")
+    return reason.strip()
+
+
+def config_gate(repo: str, entry: object) -> Result | None:
+    """A Result for a repo the config says not to touch (skipped, or a malformed
+    skip entry), else None. Such a repo is never cloned."""
+    try:
+        reason = skip_reason(entry)
+    except ValueError as e:
+        return Result(repo, Status.ERROR, message=f"github-standard.json: {e}")
+    return Result(repo, Status.SKIPPED, message=reason) if reason else None
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["adopt"]:
+        import sync_adopt  # imports this module: imported here, not at the top
+
+        return sync_adopt.main(argv[1:])
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -381,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.repo not in repos:
             print(f"{args.repo} is not registered in {args.config}", file=sys.stderr)
             return 1
-        repos = [args.repo]
+        repos = {args.repo: repos[args.repo]}
 
     if args.apply:
         problem = sync_pr.preflight()
@@ -395,8 +452,8 @@ def main(argv: list[str] | None = None) -> int:
     actions: dict[str, int] = {}
     apply_failed = 0
     with tempfile.TemporaryDirectory(prefix="dev-standards-sync-") as tmp:
-        for repo in repos:
-            result = sync_repo(org, repo, Path(tmp))
+        for repo, entry in repos.items():
+            result = config_gate(repo, entry) or sync_repo(org, repo, Path(tmp))
             results.append(result)
             print(describe(result))
             if result.status in (Status.CLEAN, Status.CONFLICTS):

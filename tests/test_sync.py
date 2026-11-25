@@ -123,7 +123,7 @@ def test_main_reports_every_repo_and_never_pushes(onboarded, origins, tmp_path, 
     assert "DRY RUN" in out
     assert "[clean] repo" in out
     assert "[error] gone" in out
-    assert "2 repos: 0 not onboarded, 0 unchanged, 1 clean, 0 conflicts, 1 error" in out
+    assert "2 repos: 0 skipped, 0 not onboarded, 0 unchanged, 1 clean, 0 conflicts, 1 error" in out
     assert git(origin, "show-ref") == refs_before  # nothing pushed
     assert config.read_text() == config_before  # config only read
 
@@ -165,7 +165,7 @@ def test_a_failing_update_is_that_repos_error_and_the_run_continues(
     out = capsys.readouterr().out
     assert "[error] repo: " in out
     assert "[clean] healthy" in out
-    assert "2 repos: 0 not onboarded, 0 unchanged, 1 clean, 0 conflicts, 1 error" in out
+    assert "2 repos: 0 skipped, 0 not onboarded, 0 unchanged, 1 clean, 0 conflicts, 1 error" in out
 
 
 def test_ctrl_c_is_not_swallowed(onboarded, tmp_path, monkeypatch):
@@ -269,3 +269,56 @@ def test_staged_changes_flag_executables_symlinks_and_mode_changes(tmp_path):
 
     assert dict(changes) == {"plain": b"changed\n", "deleted-script": None}
     assert sorted(unsupported) == ["link", "new-script", "was-plain"]
+
+
+# ── the config's skip list ──────────────────────────────────────────────────
+
+
+def test_a_skipped_repo_is_reported_with_its_reason_and_never_cloned(
+    onboarded, origins, tmp_path, capsys, monkeypatch
+):
+    cloned = []
+    real_clone = sync.clone_command
+    monkeypatch.setattr(
+        sync,
+        "clone_command",
+        lambda org, repo, dest: cloned.append(repo) or real_clone(org, repo, dest),
+    )
+    origins["kept-out"] = tmp_path / "does-not-exist"  # a clone would be an error
+    config = tmp_path / "github-standard.json"
+    config.write_text(
+        json.dumps(
+            {
+                "org": "org",
+                "repos": {
+                    "repo": {},
+                    "kept-out": {"template_sync": {"skip": "diverged on purpose"}},
+                },
+            }
+        )
+    )
+
+    assert sync.main(["--config", str(config)]) == 0
+    out = capsys.readouterr().out
+    assert "[skipped] kept-out: diverged on purpose" in out
+    assert "2 repos: 1 skipped, 0 not onboarded, 1 unchanged, 0 clean, 0 conflicts, 0 error" in out
+    assert cloned == ["repo"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param({"template_sync": {"skip": ""}}, id="empty-reason"),
+        pytest.param({"template_sync": {"skip": True}}, id="not-a-reason"),
+        pytest.param({"template_sync": "skip"}, id="not-an-object"),
+    ],
+)
+def test_a_malformed_skip_entry_is_an_error_and_the_repo_is_not_touched(
+    onboarded, tmp_path, capsys, monkeypatch, entry
+):
+    """Fails closed: a skip someone meant to write, but wrote wrong, must not sync."""
+    monkeypatch.setattr(sync, "clone_command", lambda *a: pytest.fail("cloned"))
+    config = tmp_path / "github-standard.json"
+    config.write_text(json.dumps({"org": "org", "repos": {"repo": entry}}))
+    assert sync.main(["--config", str(config)]) == 1
+    assert "[error] repo: github-standard.json: template_sync" in capsys.readouterr().out
