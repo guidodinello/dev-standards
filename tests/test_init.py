@@ -54,6 +54,36 @@ def test_detect_tests_requires_both_dir_and_pytest_dep_under_same_style(tmp_path
     assert init.detect_tests(tmp_path, pyproject, "optional") is False
 
 
+def test_detect_answers_reads_the_repo_and_overrides_win(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nrequires-python = ">=3.12"\n[dependency-groups]\ndev = ["pytest"]\n'
+    )
+    (tmp_path / "tests").mkdir()
+    assert init.detect_answers(tmp_path) == {
+        "python_version": "3.12",
+        "dev_style": "groups",
+        "include_tests": True,
+    }
+    assert init.detect_answers(tmp_path, python="3.13", tests=False) == {
+        "python_version": "3.13",
+        "dev_style": "groups",
+        "include_tests": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "pyproject",
+    [None, '[project]\nrequires-python = "<4"\n'],
+    ids=["not-python", "no-lower-bound"],
+)
+def test_detection_failures_raise_instead_of_exiting(tmp_path, pyproject):
+    """`sync.py adopt` runs detection per repo: a SystemExit would end the run."""
+    if pyproject is not None:
+        (tmp_path / "pyproject.toml").write_text(pyproject)
+    with pytest.raises(init.DetectionError):
+        init.detect_answers(tmp_path)
+
+
 def test_render_ci_strips_test_job_when_excluded():
     text = ci(python_version="3.13", branch="main", include_tests=False)
     assert "test-python" not in text
@@ -309,6 +339,13 @@ def test_dry_run_from_a_dirty_checkout_succeeds_and_writes_nothing(bootstrap, ca
     out = capsys.readouterr().out
     assert "--apply would refuse" in out
     assert "would write" in out
+
+
+def test_bootstrap_of_a_non_python_repo_fails_cleanly(bootstrap, capsys):
+    repo, config, run = bootstrap
+    (repo / "pyproject.toml").unlink()
+    assert run() == 1
+    assert "has no pyproject.toml" in capsys.readouterr().out
 
 
 def test_apply_from_a_dirty_checkout_refuses_before_writing(bootstrap):
