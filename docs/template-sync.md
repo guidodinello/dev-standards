@@ -24,7 +24,7 @@ copier.yml ──_subdirectory──▶ templates/copier/
    .github/workflows/dependabot-automerge.yml   verbatim
    .github/workflows/release.yml                verbatim; _exclude unless `release`
    .github/CODEOWNERS                           verbatim
-   CHANGELOG.md                                 verbatim; _skip_if_exists
+   CHANGELOG.md                                 verbatim; first copy only (_exclude on update)
    [= _copier_conf.answers_file =].jinja        → .copier-answers.yml
 ```
 
@@ -99,6 +99,11 @@ not built yet (decision 2).
      file the repo already has into a whole-file conflict on the first sync. The score
      is the number of differing lines (answers file and `CHANGELOG.md` excluded); ties
      go to the newest commit.
+   - **`CHANGELOG.md`** is the repo's own: `copier.yml` excludes it when
+     `_copier_operation` is `update`, so no sync adds or changes it, and adopt leaves
+     it out of the score and the residual. `_skip_if_exists` alone isn't enough:
+     Copier skips such a file only when it exists, so an update re-rendered the
+     template's placeholder into every repo without a changelog.
    - **The residual** (what still differs from the chosen render) is printed, because
      `copier update` keeps it as the repo's own edits forever: an old CI that lacks a
      job the template has never gets it from a sync, and a rendered file the repo

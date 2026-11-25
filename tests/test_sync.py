@@ -9,6 +9,7 @@ same shallow, blobless, no-checkout flags, so the probe, the checkout and
 import json
 
 import pytest
+import yaml
 from conftest import (
     CACHE_PIN,
     CACHE_PIN_B,
@@ -17,10 +18,12 @@ from conftest import (
     ZIZMOR,
     ZIZMOR_NEXT,
     commit_all,
+    copy_template,
     edit,
     edit_template,
     git,
 )
+from copier import run_copy
 
 import sync
 from sync import Status
@@ -104,6 +107,80 @@ def test_updates_to_head_even_when_the_template_has_a_version_tag(onboarded, tmp
     git(template, "tag", "1.0.0")
     edit_template(template, ZIZMOR, ZIZMOR_NEXT)
     assert ZIZMOR_NEXT in run(tmp_path).diff
+
+
+# ── CHANGELOG.md: rendered on the first copy only ─────────────────────────────
+
+CHANGELOG = "CHANGELOG.md"
+
+
+def change_template_and_its_changelog(template):
+    with (template / "templates" / "copier" / CHANGELOG).open("a") as f:
+        f.write("\n- A template-only line\n")
+    commit_all(template, "template changelog change")
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+
+
+def without_the_changelog_exclude(copier_yml: str) -> str:
+    """copier.yml as before the fix: the `_exclude` entry naming CHANGELOG.md (read
+    from the parsed list, not spelled out here) dropped, every other key kept."""
+    excludes = yaml.safe_load(copier_yml)["_exclude"]
+    (entry,) = (pattern for pattern in excludes if CHANGELOG in pattern)
+    old = "".join(line for line in copier_yml.splitlines(True) if entry not in line)
+    assert yaml.safe_load(old)["_exclude"] == [p for p in excludes if p != entry]
+    return old
+
+
+def assert_changelog_untouched(result):
+    assert result.status is Status.CLEAN
+    assert f"+        run: uvx {ZIZMOR_NEXT}" in result.diff  # the template change came in
+    assert CHANGELOG not in [path for path, _ in result.changes]
+    assert CHANGELOG not in result.diff
+
+
+def test_a_sync_never_adds_a_changelog_the_repo_does_not_have(onboarded, tmp_path):
+    """_skip_if_exists alone re-renders a missing CHANGELOG.md on every update; the
+    update-time _exclude keeps the template's placeholder out."""
+    template, origin = onboarded
+    (origin / CHANGELOG).unlink()
+    commit_all(origin, "no changelog")
+    change_template_and_its_changelog(template)
+    assert_changelog_untouched(run(tmp_path))
+
+
+def test_no_changelog_is_added_when_the_repo_is_on_a_commit_before_the_exclude(tmp_path, origins):
+    """The repo's `_commit` predates the update-time _exclude. Copier renders that
+    old commit with the new template's excludes, so CHANGELOG.md is in neither
+    render and isn't added (nor seen as deleted)."""
+    (tmp_path / "template").mkdir()
+    template = copy_template(tmp_path / "template")
+    current = (template / "copier.yml").read_text()
+    (template / "copier.yml").write_text(without_the_changelog_exclude(current))
+    git(template, "init", "-q")
+    commit_all(template, "before the exclude")
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git(origin, "init", "-q")
+    git(origin, "config", "uploadpack.allowFilter", "true")
+    run_copy(str(template), origin, defaults=True, quiet=True)
+    (origin / CHANGELOG).unlink()
+    commit_all(origin, "render, no changelog")
+    origins["repo"] = origin
+    (template / "copier.yml").write_text(current)
+    commit_all(template, "the exclude")
+    change_template_and_its_changelog(template)
+    assert_changelog_untouched(run(tmp_path))
+
+
+def test_a_sync_leaves_the_repos_own_changelog_alone(onboarded, tmp_path):
+    template, origin = onboarded
+    own = "# Changelog\n\nThe repo's own history.\n"
+    (origin / CHANGELOG).write_text(own)
+    commit_all(origin, "own changelog")
+    change_template_and_its_changelog(template)
+    result = run(tmp_path)
+    assert_changelog_untouched(result)
+    assert (tmp_path / "work" / "repo" / CHANGELOG).read_text() == own
 
 
 def test_main_reports_every_repo_and_never_pushes(onboarded, origins, tmp_path, capsys):

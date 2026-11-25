@@ -133,3 +133,12 @@ def test_untagged_template_updates_to_head_and_ignores_non_pep440_tags(project):
     assert ZIZMOR_NEXT in update(dst)
     commit = yaml.safe_load(answers.read_text())["_commit"]
     assert commit == f"template-v1-1-g{git(template, 'rev-parse', '--short', 'HEAD')}"
+
+
+def test_every_skip_if_exists_file_is_excluded_on_update():
+    """Copier skips a `_skip_if_exists` file only when it exists, so `copier update`
+    would add it to a repo without one. Each such file must also be excluded on
+    update; init.py and `sync.py adopt` rely on no sync touching them."""
+    config = yaml.safe_load((REPO_ROOT / "copier.yml").read_text())
+    for path in config["_skip_if_exists"]:
+        assert f"[% if _copier_operation == 'update' %]{path}[% endif %]" in config["_exclude"]

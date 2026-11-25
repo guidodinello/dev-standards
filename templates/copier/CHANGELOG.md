@@ -8,9 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - Initial project bootstrap with dev-standards baseline
 
 ## [0.1.0] - YYYY-MM-DD
 
 ### Added
+
 - Project scaffolded
