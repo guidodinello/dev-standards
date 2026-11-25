@@ -384,7 +384,7 @@ def test_release_template_is_least_privilege_and_tag_triggered():
     text = rendered()[RELEASE]
     assert 'tags: ["v*"]' in text
     assert (
-        text.count("\n      contents: write\n") == 1
+        text.count("\n      contents: write") == 1  # may carry an explanatory comment
     )  # one job; top level stays `permissions: {}`
     assert "\npermissions: {}\n" in text
     assert text.count("fromJSON(vars.CI_RUNNERS") == 1
