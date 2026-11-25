@@ -26,12 +26,12 @@ REPO_ROOT = Path(__file__).resolve().parent
 
 # `repo: URL` immediately followed by `rev: VERSION` — matches every hook
 # entry in a .pre-commit-config.yaml regardless of which repo it is.
-_PRE_COMMIT_REV = re.compile(r"(repo:\s*(\S+)\n\s*rev:\s*)(\S+)")
+PRE_COMMIT_REV = re.compile(r"(repo:\s*(\S+)\n\s*rev:\s*)(\S+)")
 
 # `uses: owner/action@VERSION [# tag]` — matches every action pin in a workflow
 # file. The optional same-line comment is part of the pin: SHA-pinned actions
 # carry their tag there (`@<sha> # v7`), and Dependabot bumps both together.
-_ACTION_USES = re.compile(r"(uses:\s*([^@\s]+)@)(\S+(?:[ \t]+#[^\n]*)?)")
+ACTION_USES = re.compile(r"(uses:\s*([^@\s]+)@)(\S+(?:[ \t]+#[^\n]*)?)")
 
 # Checked-in file -> the templates/copier/ file it is rendered from.
 TEMPLATE = REPO_ROOT / "templates/copier"
@@ -47,11 +47,11 @@ PAIRS = [
 ]
 
 
-def _extract_pins(text: str, pattern: re.Pattern) -> dict[str, str]:
+def extract_pins(text: str, pattern: re.Pattern) -> dict[str, str]:
     return {m.group(2): m.group(3) for m in pattern.finditer(text)}
 
 
-def _apply_pins(template_text: str, pattern: re.Pattern, pins: dict[str, str]) -> str:
+def apply_pins(template_text: str, pattern: re.Pattern, pins: dict[str, str]) -> str:
     def repl(m: re.Match) -> str:
         pin = pins.get(m.group(2))
         return f"{m.group(1)}{pin}" if pin else m.group(0)
@@ -61,8 +61,8 @@ def _apply_pins(template_text: str, pattern: re.Pattern, pins: dict[str, str]) -
 
 def sync_pins(checked_in_text: str, template_text: str) -> str:
     updated = template_text
-    for pattern in (_PRE_COMMIT_REV, _ACTION_USES):
-        updated = _apply_pins(updated, pattern, _extract_pins(checked_in_text, pattern))
+    for pattern in (PRE_COMMIT_REV, ACTION_USES):
+        updated = apply_pins(updated, pattern, extract_pins(checked_in_text, pattern))
     return updated
 
 
