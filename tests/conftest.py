@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from copier import run_copy
 
+import sync
+import sync_pr
 import sync_self_host
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -120,3 +122,39 @@ def edit(repo: Path, rel: Path, old: str, new: str, message: str) -> None:
 
 def edit_template(template: Path, old: str, new: str) -> None:
     edit(template, Path("templates/copier") / f"{CI}.jinja", old, new, "template change")
+
+
+# ── sync.py: local origins instead of GitHub ────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _no_real_github(monkeypatch):
+    """gh is authenticated on dev machines: no test may reach GitHub through
+    sync_pr's seam unless it installs a fake."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("test reached the real GitHub seam; install a fake")
+
+    monkeypatch.setattr(sync_pr, "github", refuse)
+    monkeypatch.setattr(sync_pr, "token_scopes", refuse)
+
+
+@pytest.fixture
+def origins(monkeypatch):
+    """Repo name -> local origin repo; sync.clone_command clones from it."""
+    repos = {}
+
+    def clone_command(org, repo, dest):
+        return ["git", "clone", *sync.CLONE_FLAGS, f"file://{repos[repo]}", str(dest)]
+
+    monkeypatch.setattr(sync, "clone_command", clone_command)
+    return repos
+
+
+@pytest.fixture
+def onboarded(project, origins):
+    """(template, origin): a repo rendered from the template, registered as `repo`."""
+    template, origin = project
+    git(origin, "config", "uploadpack.allowFilter", "true")  # honour --filter=blob:none
+    origins["repo"] = origin
+    return template, origin

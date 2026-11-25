@@ -9,8 +9,10 @@ that commit to the repo's current files as a 3-way merge.
 ## Where it stands
 
 `init.py` renders every file through Copier (PR 2). `sync.py` (PR 3) previews
-`copier update` on every registered repo with an answers file, as a dry run; opening
-the sync PRs is PR 4. Repos bootstrapped before PR 2 have no answers file (PR 5).
+`copier update` on every registered repo with an answers file, and `sync.py --apply`
+(PR 4) opens or updates one signed sync PR per repo with a real change (README §
+Syncing template changes). Repos bootstrapped before PR 2 have no answers file yet
+(PR 5).
 
 ```
 init.py ──detection as answers──▶ copier run_copy(this checkout, vcs_ref=HEAD)
@@ -80,7 +82,9 @@ answer still needs its own test in PR 5.
    higher version wins. A SHA pin is compared by its `# vX` comment. A version it
    can't compare (no tag comment, not PEP 440, or equal tags on different SHAs)
    leaves the conflict. Any other conflict stays inline, and the PR (PR 4) opens
-   as a draft, so the markers fail CI instead of merging.
+   as a draft. If GitHub refuses the draft, it is a normal PR titled
+   `[conflicts] ...` that says not to merge. The rendered pre-commit config's
+   `check-merge-conflict` hook keeps CI red while a marker remains in any file.
 2. **Onboarding existing repos.** Decided (2026-11-25). Write `.copier-answers.yml` from `init.py`'s
    detection. Set `_commit` to the dev-standards commit whose render differs
    least from the repo's current files. Commit only that file, then run a normal
@@ -98,5 +102,5 @@ answer still needs its own test in PR 5.
 | 1 | The spike (#54). |
 | 2 | Done: `init.py` renders through Copier. The answers come from the existing detection, and the CLI flags stay. The plain CI and pre-commit templates are removed, and the other files (dependabot, automerge, CODEOWNERS, CHANGELOG via `_skip_if_exists`, opt-in release) move in. Copier is a project dependency (uv.lock, bumped by Dependabot), so `init.py` runs through `uv run` (its shebang), no longer stdlib-only. |
 | 3 | Done: `sync.py`, dry run: for each repo in `github-standard.json` that has `.copier-answers.yml`, run `copier update` in a fresh clone and print the diff and any conflicts. Plus the pin post-step. |
-| 4 | `sync.py --apply`: a branch, a signed commit (GraphQL `createCommitOnBranch`), and a PR titled `chore(dev-standards): sync templates to <ref>`. The README stops saying templates never re-apply. |
+| 4 | Done: `sync.py --apply`: a branch, a signed commit (GraphQL `createCommitOnBranch`), and a PR titled `chore(dev-standards): sync templates to <ref>`. The README stops saying templates never re-apply. |
 | 5 | `sync.py adopt <repo>` for onboarding. Then roll out in waves: system-one, the small Python repos, fitted. |
