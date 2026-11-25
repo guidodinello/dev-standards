@@ -9,11 +9,18 @@ _templates_suffix: .jinja
 
 # The release workflow is opt-in (libraries and distributed apps only). With
 # _subdirectory set, Copier has no default excludes, so this is the whole list.
+#
+# CHANGELOG.md is rendered only on the first copy. _skip_if_exists alone is not
+# enough: Copier skips such a file only when it exists, so `copier update` would
+# add the placeholder to a repo that has no changelog. Excluded on update, it is
+# in none of update's renders (the old commit's render uses these patterns too),
+# so an update neither adds nor touches it.
 _exclude:
   - "[% if not release %].github/workflows/release.yml[% endif %]"
+  - "[% if _copier_operation == 'update' %]CHANGELOG.md[% endif %]"
 
-# A repo's changelog is its own after the first render: never overwritten, by
-# init.py --force or by `copier update`.
+# A repo's changelog is its own after the first render: init.py keeps an
+# existing one even with --force (init.skip_if_exists_patterns reads this list).
 _skip_if_exists:
   - CHANGELOG.md
 

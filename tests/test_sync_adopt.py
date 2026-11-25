@@ -305,3 +305,19 @@ def test_a_rendered_file_the_repo_lacks_stays_missing_and_is_flagged(legacy, tmp
     assert "CODEOWNERS" not in adoption.preview.diff
     assert f"+        run: uvx {ZIZMOR_NEXT}" in adoption.preview.diff
     assert "(missing here: no sync will add it)" in sync_adopt.report(adoption)
+
+
+def test_the_first_sync_never_adds_a_changelog_the_repo_lacks(legacy, tmp_path):
+    """CHANGELOG.md is the repo's own (`_skip_if_exists`) and excluded on update, so
+    its absence is neither scored nor reported, and the first sync doesn't add it."""
+    template, origin = legacy
+    (origin / "CHANGELOG.md").unlink()
+    commit_all(origin, "no changelog")
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+
+    adoption = adopt(tmp_path)
+
+    assert "CHANGELOG.md" not in [path for path, _, _ in adoption.chosen.residual]
+    assert adoption.preview.status is Status.CLEAN
+    assert "CHANGELOG.md" not in [path for path, _ in adoption.preview.changes]
+    assert not (tmp_path / "work" / "repo" / "CHANGELOG.md").exists()
