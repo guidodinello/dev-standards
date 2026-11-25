@@ -42,7 +42,7 @@ jobs:
     # Same runner switch as CI — see dev-standards' README § CI runners.
     runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
     permissions:
-      contents: write
+      contents: write # create the GitHub Release and upload its assets
     env:
       # Per-ecosystem hook. Must leave the files to attach matching ARTIFACTS.
       # Python default: wheel + sdist into dist/.
