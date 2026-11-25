@@ -3,9 +3,11 @@ name = "dev-standards"
 version = "0.1.0"
 description = "Bootstrap and audit the org's CI/pre-commit/Dependabot/GitHub-config baseline."
 requires-python = ">=3.13"
-# init.py renders the templates through Copier (copier.yml, templates/copier/).
+# init.py renders the templates through Copier (copier.yml, templates/copier/);
+# sync.py runs `copier update` and compares pin versions with packaging.
 dependencies = [
   "copier>=9.19.1",
+  "packaging>=25",
 ]
 
 [tool.uv]
@@ -17,6 +19,10 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.13",
 ]
+
+[tool.pytest.ini_options]
+# sync.py imports sync_self_host from the repo root, as it does when run directly.
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py313"

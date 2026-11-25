@@ -1,8 +1,14 @@
 import importlib.util
+import re
+import shutil
+import subprocess
 from functools import cache
 from pathlib import Path
 
 import pytest
+from copier import run_copy
+
+import sync_self_host
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -50,3 +56,67 @@ def _git_identity(monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+
+
+# ── scratch template + rendered repos, for `copier update` tests ─────────────
+
+CI = Path(".github/workflows/ci.yml")
+
+# Read from the template, never written out: sync_self_host.py rewrites these pins
+# on every Dependabot bump, and a literal here would turn the update tests red.
+_CI_TEMPLATE = (REPO_ROOT / "templates" / "copier" / f"{CI}.jinja").read_text()
+# actions/cache's pin in the lint job, the one pin that appears once in ci.yml.
+CACHE_PIN = (
+    "actions/cache@"
+    + sync_self_host.extract_pins(_CI_TEMPLATE, sync_self_host.ACTION_USES)["actions/cache"]
+)
+CACHE_PIN_B = "actions/cache@" + "b" * 40 + " # v99.0.0"
+CACHE_PIN_C = "actions/cache@" + "c" * 40 + " # v99.1.0"
+ZIZMOR = re.search(r"zizmor@\S+", _CI_TEMPLATE).group()
+ZIZMOR_NEXT = "zizmor@99.0.0"
+
+
+def git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def copy_template(dst: Path) -> Path:
+    """The template alone, outside this repo's git history, so a render reads the
+    working tree (not HEAD) and works in CI's shallow checkout."""
+    shutil.copy(REPO_ROOT / "copier.yml", dst / "copier.yml")
+    shutil.copytree(REPO_ROOT / "templates" / "copier", dst / "templates" / "copier")
+    return dst
+
+
+@pytest.fixture
+def project(tmp_path):
+    """(template git repo, destination git repo rendered from it and committed)."""
+    (tmp_path / "template").mkdir()
+    template = copy_template(tmp_path / "template")
+    git(template, "init", "-q")
+    commit_all(template, "v1")
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    git(dst, "init", "-q")
+    run_copy(str(template), dst, defaults=True, quiet=True)
+    commit_all(dst, "render")
+    return template, dst
+
+
+def commit_all(repo: Path, message: str) -> None:
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", message)
+
+
+def edit(repo: Path, rel: Path, old: str, new: str, message: str) -> None:
+    path = repo / rel
+    text = path.read_text()
+    assert old in text, old
+    path.write_text(text.replace(old, new))
+    commit_all(repo, message)
+
+
+def edit_template(template: Path, old: str, new: str) -> None:
+    edit(template, Path("templates/copier") / f"{CI}.jinja", old, new, "template change")

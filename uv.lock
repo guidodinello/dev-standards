@@ -59,6 +59,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "copier" },
+    { name = "packaging" },
 ]
 
 [package.dev-dependencies]
@@ -69,7 +70,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "copier", specifier = ">=9.19.1" }]
+requires-dist = [
+    { name = "copier", specifier = ">=9.19.1" },
+    { name = "packaging", specifier = ">=25" },
+]
 
 [package.metadata.requires-dev]
 dev = [
