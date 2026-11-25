@@ -289,11 +289,9 @@ reviewed by hand (see [Dependabot](#dependabot)). `tests/test_init.py` fails if 
 rendered or checked-in workflow has an unpinned `uses:` or a checkout that persists
 credentials.
 
-`templates/ci/python-ci.yml` includes an **advisory** `Audit workflows (advisory)` job
-running a pinned `zizmor`. It is deliberately outside the `CI` job's `needs:` and its
-step is `continue-on-error`, so findings never block a merge. Move it to blocking once it
-has run clean for a few weeks; bump its pinned version by hand (Dependabot does not track
-`uvx` pins).
+`templates/ci/python-ci.yml` includes a blocking `Audit workflows` job running a pinned
+`zizmor`. It is in the `CI` job's `needs:`, so a finding blocks the merge. Bump its pinned
+version by hand (Dependabot does not track `uvx` pins).
 
 ## Adding a new repo
 

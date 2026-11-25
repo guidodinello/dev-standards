@@ -108,7 +108,7 @@ def test_render_ci_aggregate_job_needs_every_job():
     rendered = init.render_ci(
         version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=True
     )
-    assert _ci_needs(rendered) == ["lint-python", "test-python"]
+    assert _ci_needs(rendered) == ["lint-python", "test-python", "audit-workflows"]
     assert "if: always()" in rendered
 
 
@@ -116,7 +116,7 @@ def test_render_ci_without_tests_keeps_aggregate_job_without_dangling_need():
     rendered = init.render_ci(
         version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=False
     )
-    assert _ci_needs(rendered) == ["lint-python"]
+    assert _ci_needs(rendered) == ["lint-python", "audit-workflows"]
     assert "test-python" not in rendered
     assert rendered.count("fromJSON(vars.CI_RUNNERS") == 3
 
@@ -245,16 +245,16 @@ def test_release_checkout_fetches_full_history():
 
 
 @pytest.mark.parametrize("include_tests", [True, False])
-def test_ci_audit_job_survives_render_and_is_not_required(include_tests):
+def test_ci_audit_job_survives_render_and_is_required(include_tests):
     text = init.render_ci(
         version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=include_tests
     )
     assert "  audit-workflows:\n" in text
     ci_job = text[text.index("\n  ci:\n") :]
     needs = ci_job[: ci_job.index("if: always()")]
-    assert "audit-workflows" not in needs
+    assert "      - audit-workflows\n" in needs
     zizmor_step = text[text.index("name: zizmor") :]
-    assert "continue-on-error: true" in zizmor_step.split("run:")[0]
+    assert "continue-on-error" not in zizmor_step.split("run:")[0]
 
 
 def test_automerge_policy():

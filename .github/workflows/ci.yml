@@ -17,7 +17,7 @@
 # `needs:` list.
 #
 # Every action is SHA-pinned (tag as a trailing comment) and checkout drops its
-# credentials; the advisory zizmor job audits that. See docs/github-standard.md
+# credentials; the zizmor job audits that. See docs/github-standard.md
 # § Supply chain.
 #
 # Deliberately not in this baseline (add per repo if wanted): `uv sync
@@ -111,11 +111,10 @@ jobs:
       - name: pre-commit hooks
         run: uv run pre-commit run --all-files --show-diff-on-failure
 
-  # Blocking in this repo: audits the workflow files with zizmor and is in the
-  # `CI` job's needs:, so a finding blocks the merge. (templates/ci/python-ci.yml
-  # ships it advisory; adopters make it blocking once it has run clean.) The
-  # version is pinned so a new upstream audit cannot turn this red between runs;
-  # Dependabot does not bump a `uvx` pin, so bump it by hand.
+  # Audits the workflow files with zizmor. It is in the `CI` job's needs:, so a
+  # finding blocks the merge. The version is pinned so a new upstream audit
+  # cannot turn this red between runs; Dependabot does not bump a `uvx` pin, so
+  # bump it by hand.
   # GH_TOKEN is the read-only workflow token; it enables the online audits that
   # check each pinned SHA really belongs to the tagged repo.
   audit-workflows:
