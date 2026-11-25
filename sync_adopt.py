@@ -126,7 +126,9 @@ def _diff(path: str, rendered: str, current: str | None) -> tuple[int, str]:
 
 def _score(files: dict[str, str], dest: Path) -> tuple[int, tuple[tuple[str, int, str], ...]]:
     """Lines that differ between a render and the repo, per rendered file. The
-    answers file and the repo-owned `_skip_if_exists` files don't count."""
+    answers file and the repo-owned `_skip_if_exists` files don't count. Leaving
+    those out hides nothing: copier.yml excludes them on update, so no sync adds,
+    changes or removes them, whatever the repo has."""
     owned = init.skip_if_exists_patterns()
     residual = []
     for path, text in sorted(files.items()):
