@@ -82,9 +82,9 @@ answer still needs its own test in PR 5.
    higher version wins. A SHA pin is compared by its `# vX` comment. A version it
    can't compare (no tag comment, not PEP 440, or equal tags on different SHAs)
    leaves the conflict. Any other conflict stays inline, and the PR (PR 4) opens
-   as a draft, so the markers fail CI instead of merging. Where drafts aren't
-   available (private repos on GitHub Free) it is a normal PR titled
-   `[conflicts] ...` that says not to merge; CI stays red the same way.
+   as a draft. If GitHub refuses the draft, it is a normal PR titled
+   `[conflicts] ...` that says not to merge. The rendered pre-commit config's
+   `check-merge-conflict` hook keeps CI red while a marker remains in any file.
 2. **Onboarding existing repos.** Decided (2026-11-25). Write `.copier-answers.yml` from `init.py`'s
    detection. Set `_commit` to the dev-standards commit whose render differs
    least from the repo's current files. Commit only that file, then run a normal

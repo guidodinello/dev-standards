@@ -23,7 +23,8 @@ version, but only when the two sides differ in nothing but pins (a pre-commit
 version it can't compare, stays a conflict.
 
 --apply skips `unchanged` and "answers only" repos (no PR for a `_commit` that
-moved without changing any file) and opens a draft for `conflicts`.
+moved without changing any file) and opens a draft for `conflicts`. A file mode the
+API commit can't carry (executable, symlink) is reported here and refused by --apply.
 
 Usage:
     ./sync.py                       # dry run, every registered repo
@@ -110,6 +111,9 @@ class Result:
     new_commit: str = ""  # template commit it was updated to
     template_url: str = ""  # the answers' _src_path
     changes: tuple[tuple[str, bytes | None], ...] = ()  # (path, contents | None = deleted)
+    # Paths whose file mode the API commit can't carry (executable, symlink, mode
+    # change): reported by the dry run, refused by --apply.
+    unsupported_modes: tuple[str, ...] = ()
 
     @property
     def pins_resolved(self) -> int:
@@ -252,7 +256,7 @@ def sync_repo(org: str, repo: str, workdir: Path) -> Result:
         _run(["git", "add", "-A"], cwd=dest)
         diff = _run(["git", "diff", "--cached", "HEAD"], cwd=dest)
         changed = _run(["git", "diff", "--cached", "--name-only", "HEAD"], cwd=dest).split()
-        changes = _staged_changes(dest)
+        changes, unsupported_modes = _staged_changes(dest)
         new_answers = (dest / ANSWERS_FILE).read_text()
     except subprocess.CalledProcessError as e:
         return Result(repo, Status.ERROR, message=(e.stderr or str(e)).strip())
@@ -283,6 +287,7 @@ def sync_repo(org: str, repo: str, workdir: Path) -> Result:
         new_commit=_answer(new_answers, "_commit"),
         template_url=_answer(new_answers, "_src_path"),
         changes=changes,
+        unsupported_modes=unsupported_modes,
     )
 
 
@@ -291,19 +296,30 @@ def _answer(answers_text: str, key: str) -> str:
     return match.group(1).strip().strip("'\"") if match else ""
 
 
-def _staged_changes(dest: Path) -> tuple[tuple[str, bytes | None], ...]:
-    """The staged change set as (path, new contents | None for a deletion): what a
-    `createCommitOnBranch` call carries. That API has no file modes, so a mode
-    change can't be committed faithfully and fails the repo instead."""
-    summary = _run(["git", "diff", "--cached", "--summary", "HEAD"], cwd=dest)
-    if "mode change" in summary:
-        raise ValueError(f"file mode change can't be synced through the API:\n{summary}")
-    status = _run(["git", "diff", "--cached", "--name-status", "--no-renames", "HEAD"], cwd=dest)
-    changes = []
-    for line in status.splitlines():
-        kind, path = line.split("\t", 1)
-        changes.append((path, None if kind == "D" else (dest / path).read_bytes()))
-    return tuple(changes)
+_REGULAR_FILE = "100644"
+_ABSENT = "000000"
+
+
+def _staged_changes(
+    dest: Path,
+) -> tuple[tuple[tuple[str, bytes | None], ...], tuple[str, ...]]:
+    """The staged change set as (path, new contents | None for a deletion), which is
+    what a `createCommitOnBranch` call carries, plus the paths it can't carry: that
+    API writes every file as a regular 100644 file, so a new executable or symlink,
+    or a mode change, would be committed wrong. Those are reported, not read."""
+    raw = _run(["git", "diff", "--cached", "--raw", "--no-renames", "HEAD"], cwd=dest)
+    changes: list[tuple[str, bytes | None]] = []
+    unsupported: list[str] = []
+    for line in raw.splitlines():
+        meta, path = line.split("\t", 1)
+        old_mode, new_mode, _old_sha, _new_sha, status = meta.lstrip(":").split()
+        if status == "D":
+            changes.append((path, None))
+        elif new_mode != _REGULAR_FILE or old_mode not in (_ABSENT, _REGULAR_FILE):
+            unsupported.append(path)
+        else:
+            changes.append((path, (dest / path).read_bytes()))
+    return tuple(changes), tuple(unsupported)
 
 
 def _only_commit_changed(diff: str) -> bool:
@@ -326,6 +342,11 @@ def describe(result: Result) -> str:
         notes.append(f"{result.pins_resolved} pin conflict(s) auto-resolved to the newer version")
     if result.conflicted_files:
         notes.append(f"conflicts left in {', '.join(result.conflicted_files)}")
+    if result.unsupported_modes:
+        notes.append(
+            "file mode the API commit can't carry (--apply refuses this repo): "
+            + ", ".join(result.unsupported_modes)
+        )
     if result.message:
         notes.append(result.message)
     line = f"[{result.status.value}] {result.repo}"

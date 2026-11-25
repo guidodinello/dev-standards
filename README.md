@@ -99,18 +99,27 @@ default branch:
   it and rulesets that require signed commits accept it. The PR body links the
   template range, lists the changed files and any pins resolved, and links issue #53.
 - `unchanged` and "answers only" repos get no PR.
-- `conflicts` get a draft PR listing the conflicted files. Where drafts aren't
-  available (private repos on GitHub Free), a normal PR titled `[conflicts] ...` that
-  says not to merge; the markers keep CI red either way.
-- Re-running is safe. An open sync PR that already holds the same result is left as
-  is; if the template or the default branch moved, its branch is rebuilt as one fresh
-  commit on the default branch and the PR updated, never a second PR. A sync branch
-  with a commit `sync.py` didn't make (a conflict fix, GitHub's "Update branch") is
-  never overwritten: merge or close that PR and delete the branch to sync again. A
-  sync PR closed without merging isn't reopened for the same template commit.
+- `conflicts` get a draft PR listing the conflicted files. If GitHub refuses the
+  draft (draft availability on private repos has depended on the plan), a normal PR
+  titled `[conflicts] ...` that says not to merge. Either way CI stays red while a
+  marker remains: the rendered pre-commit config runs `check-merge-conflict` on every
+  file.
+- Re-running is safe. If `dev-standards/sync` exists, its head must be a commit
+  `sync.py` made (GitHub-made and verified, on the base commit, with exactly the
+  content its `Dev-Standards-*` trailers describe), with or without an open PR.
+  Anything else (a conflict fix, an amended sync commit, GitHub's "Update branch") is
+  never overwritten: merge or close that work and delete the branch to sync again.
+  When the branch already holds the current result, no commit is made, and the PR is
+  still opened or its title and body corrected, so a run that failed halfway is
+  repaired by the next one. When the template or the default branch moved, the branch
+  is rebuilt as one fresh commit on the default branch and the same PR updated. A
+  sync PR closed without merging isn't reopened for the same template commit (matched
+  by its head commit, not its title).
+- A file the API commit can't carry (a new executable or symlink, a mode change) is
+  reported by the dry run, and `--apply` refuses that repo.
 - It needs gh's token to have the `workflow` scope (a sync usually edits
-  `.github/workflows/`) and stops before writing anything if it doesn't
-  (`gh auth refresh -s workflow`).
+  `.github/workflows/`) and stops before writing anything if it doesn't, or if the
+  scopes can't be read (`gh auth refresh -s workflow`).
 
 Exits 1 if any repo errored or its PR step failed; the other repos still run.
 
