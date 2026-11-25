@@ -39,7 +39,7 @@ import json
 import re
 import subprocess
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
     from sync import Result
@@ -133,8 +133,25 @@ def preflight() -> str | None:
 # ── what a sync commit says about itself ────────────────────────────────────
 
 
+class PrText(NamedTuple):
+    """What a PR and its commit say: the title (also the commit headline), the PR
+    body, and the commit body's summary line (the trailers follow it)."""
+
+    title: str
+    body: str
+    summary: str
+
+
 def title_for(result: Result) -> str:
     return f"chore(dev-standards): sync templates to {result.new_commit}"
+
+
+def sync_text(result: Result) -> PrText:
+    return PrText(
+        title_for(result),
+        pr_body(result),
+        f"Template {result.old_commit}..{result.new_commit}, applied with copier update.",
+    )
 
 
 def blob_sha(contents: bytes) -> str:
@@ -173,15 +190,15 @@ def _trailers(message: str) -> dict[str, str]:
     return dict(re.findall(r"^([A-Za-z-]+): *(.+)$", message, re.M))
 
 
-def commit_message(result: Result) -> tuple[str, str]:
+def commit_message(result: Result, text: PrText) -> tuple[str, str]:
     body = (
-        f"Template {result.old_commit}..{result.new_commit}, applied with copier update.\n\n"
+        f"{text.summary}\n\n"
         f"{TRAILER_SYNC}: 1\n"
         f"{TRAILER_TEMPLATE}: {result.new_commit}\n"
         f"{TRAILER_BASE}: {result.base_sha}\n"
         f"{TRAILER_CONTENT}: {content_digest(result)}\n"
     )
-    return title_for(result), body
+    return text.title, body
 
 
 def sync_commit_trailers(repo_path: str, sha: str) -> dict[str, str] | None:
@@ -271,12 +288,12 @@ def _set_ref(repo_path: str, branch: str, sha: str) -> None:
         github("POST", f"{repo_path}/git/refs", {"ref": f"refs/heads/{branch}", "sha": sha})
 
 
-def push_commit(org: str, repo: str, result: Result) -> str:
+def push_commit(org: str, repo: str, result: Result, text: PrText) -> str:
     """Commit the change set on top of the base commit and point the sync branch at
     it. Returns the new commit's oid."""
     repo_path = f"repos/{org}/{repo}"
     _set_ref(repo_path, SCRATCH_BRANCH, result.base_sha)
-    headline, body = commit_message(result)
+    headline, body = commit_message(result, text)
     data = github(
         "POST",
         "graphql",
@@ -332,8 +349,12 @@ def _declined(repo_path: str, pulls: list[dict[str, Any]], result: Result) -> st
     return None
 
 
-def apply_repo(org: str, repo: str, result: Result) -> tuple[Action, str]:
-    """Open or update this repo's sync PR. Returns (action, detail: URL or reason)."""
+def apply_repo(
+    org: str, repo: str, result: Result, text: PrText | None = None
+) -> tuple[Action, str]:
+    """Open or update this repo's sync PR. Returns (action, detail: URL or reason).
+    `text` defaults to a sync's; `sync.py adopt` passes its own."""
+    text = text or sync_text(result)
     if result.unsupported_modes:
         raise ValueError(
             "the API commit can't carry these files' modes (executable, symlink or mode "
@@ -367,9 +388,8 @@ def apply_repo(org: str, repo: str, result: Result) -> tuple[Action, str]:
             )
 
     if not current:
-        push_commit(org, repo, result)
-    title = title_for(result)
-    body = pr_body(result)
+        push_commit(org, repo, result, text)
+    title, body = text.title, text.body
     conflicts = bool(result.conflicted_files)
 
     if open_pr is not None:
