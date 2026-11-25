@@ -9,6 +9,7 @@ same shallow, blobless, no-checkout flags, so the probe, the checkout and
 import json
 
 import pytest
+import yaml
 from conftest import (
     CACHE_PIN,
     CACHE_PIN_B,
@@ -111,12 +112,23 @@ def test_updates_to_head_even_when_the_template_has_a_version_tag(onboarded, tmp
 # ── CHANGELOG.md: rendered on the first copy only ─────────────────────────────
 
 CHANGELOG = "CHANGELOG.md"
-UPDATE_EXCLUDE = "  - \"[% if _copier_operation == 'update' %]CHANGELOG.md[% endif %]\"\n"
 
 
 def change_template_and_its_changelog(template):
-    edit(template, f"templates/copier/{CHANGELOG}", "Project scaffolded", "Scaffolded", "cl")
+    with (template / "templates" / "copier" / CHANGELOG).open("a") as f:
+        f.write("\n- A template-only line\n")
+    commit_all(template, "template changelog change")
     edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+
+
+def without_the_changelog_exclude(copier_yml: str) -> str:
+    """copier.yml as before the fix: the `_exclude` entry naming CHANGELOG.md (read
+    from the parsed list, not spelled out here) dropped, every other key kept."""
+    excludes = yaml.safe_load(copier_yml)["_exclude"]
+    (entry,) = (pattern for pattern in excludes if CHANGELOG in pattern)
+    old = "".join(line for line in copier_yml.splitlines(True) if entry not in line)
+    assert yaml.safe_load(old)["_exclude"] == [p for p in excludes if p != entry]
+    return old
 
 
 def assert_changelog_untouched(result):
@@ -143,8 +155,7 @@ def test_no_changelog_is_added_when_the_repo_is_on_a_commit_before_the_exclude(t
     (tmp_path / "template").mkdir()
     template = copy_template(tmp_path / "template")
     current = (template / "copier.yml").read_text()
-    assert UPDATE_EXCLUDE in current
-    (template / "copier.yml").write_text(current.replace(UPDATE_EXCLUDE, ""))
+    (template / "copier.yml").write_text(without_the_changelog_exclude(current))
     git(template, "init", "-q")
     commit_all(template, "before the exclude")
     origin = tmp_path / "origin"

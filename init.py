@@ -333,7 +333,8 @@ def write_rendered(path: Path, content: str, *, apply: bool, force: bool) -> boo
 def write_all(files: dict[Path, str], out_root: Path, *, apply: bool, force: bool) -> None:
     """Writes the render. Two rules on top of write_rendered:
     - A `_skip_if_exists` file (CHANGELOG.md) that exists is the repo's own: kept
-      even with --force, as `copier update` keeps it.
+      even with --force. `copier update` never touches it either: copier.yml
+      excludes it on update.
     - .copier-answers.yml claims every other file came from this render's
       `_commit`. If any of them is skipped because it already exists (no --force),
       that claim would be false, and a later `copier update` would 3-way merge
