@@ -1,39 +1,49 @@
 # Template sync with Copier (issue #53)
 
-`init.py` renders `templates/` once, at bootstrap. A template fix never reaches a
-repo rendered before it. The plan is to render with [Copier](https://copier.readthedocs.io/):
+Before Copier, `init.py` rendered `templates/` once, at bootstrap, and a template
+fix never reached a repo rendered before it. With [Copier](https://copier.readthedocs.io/)
 each repo records the template commit it was rendered from and its answers in
 `.copier-answers.yml`, and `copier update` applies the template's change since
 that commit to the repo's current files as a 3-way merge.
 
 ## Where it stands
 
-Spike (this PR): `copier.yml` plus `templates/copier/` render the CI workflow and
-the pre-commit config. Nothing uses it yet. `init.py` still renders every file
-itself.
+`init.py` renders every file through Copier (PR 2). Nothing runs `copier update`
+on existing repos yet (PR 3/4), and repos bootstrapped before PR 2 have no answers
+file (PR 5).
 
 ```
+init.py ──detection as answers──▶ copier run_copy(this checkout, vcs_ref=HEAD)
 copier.yml ──_subdirectory──▶ templates/copier/
-                                ├─ .github/workflows/ci.yml.jinja   twin of templates/ci/python-ci.yml
-                                ├─ .pre-commit-config.yaml.jinja    twin of templates/pre-commit/python.yaml
-                                └─ [= _copier_conf.answers_file =].jinja
+   .pre-commit-config.yaml.jinja
+   .github/workflows/ci.yml.jinja
+   .github/dependabot.yml                       verbatim
+   .github/workflows/dependabot-automerge.yml   verbatim
+   .github/workflows/release.yml                verbatim; _exclude unless `release`
+   .github/CODEOWNERS                           verbatim
+   CHANGELOG.md                                 verbatim; _skip_if_exists
+   [= _copier_conf.answers_file =].jinja        → .copier-answers.yml
 ```
 
-While both exist:
-
-- `tests/test_copier_template.py` checks that the Copier output is byte-equal to
-  `init.render_ci` / `init.render_pre_commit` over the whole option matrix.
-- `sync_self_host.py` writes a Dependabot pin bump into both the plain template
-  and its `.jinja` twin.
+- **Answers:** `python_version`, `dev_style`, `locked`, `include_tests`, `branch`,
+  `release`. `install_cmd` is computed in `copier.yml` and not stored.
+- **`_src_path`:** `init.py` rewrites it in the answers file to
+  `https://github.com/guidodinello/dev-standards.git`, so `copier update` works from
+  any machine, not only from the checkout that rendered it.
+- **`_commit`:** to keep it a commit the remote has, `init.py` refuses to bootstrap
+  a real repo from a dirty checkout or from a HEAD that isn't on `origin/main`.
+  `--render-to` renders whatever is checked out.
+- **Running it:** Copier is a project dependency, so `init.py` runs in the project
+  environment: `./init.py` (shebang `uv run`) or `uv run ./init.py`, from this
+  checkout.
 
 The Jinja delimiters are `[= =]`, `[% %]` and `[# #]`. The defaults won't do:
 `{{ }}` collides with GitHub's `${{ }}`, and `[[ ]]` collides with bash's `[[`
-in the `CI` job. A test checks that no file under `templates/` contains them.
+in the `CI` job. A test checks that no verbatim file under `templates/` contains them.
 
-Try it:
+Try an update by hand:
 
 ```bash
-uv run copier copy --defaults -d include_tests=false . /tmp/out   # render
 cd <repo> && uv run --project <dev-standards> copier update --defaults --conflict inline
 ```
 
@@ -83,8 +93,8 @@ tested yet; PR5 adds the test.
 
 | PR | Scope |
 |---|---|
-| 1 | This spike. |
-| 2 | `init.py` renders through Copier. The answers come from the existing detection, and the CLI flags stay. The plain CI and pre-commit templates are removed, and the other files (dependabot, automerge, CODEOWNERS, CHANGELOG via `_skip_if_exists`, opt-in release) move in. `init.py` gains a dependency, so it runs as `uv run ./init.py` (or a PEP 723 script), no longer stdlib-only. |
+| 1 | The spike (#54). |
+| 2 | Done: `init.py` renders through Copier. The answers come from the existing detection, and the CLI flags stay. The plain CI and pre-commit templates are removed, and the other files (dependabot, automerge, CODEOWNERS, CHANGELOG via `_skip_if_exists`, opt-in release) move in. Copier is a project dependency (uv.lock, bumped by Dependabot), so `init.py` runs through `uv run` (its shebang), no longer stdlib-only. |
 | 3 | `sync.py`, dry run: for each repo in `github-standard.json` that has `.copier-answers.yml`, run `copier update` in a fresh clone and print the diff and any conflicts. Plus the pin post-step. |
 | 4 | `sync.py --apply`: a branch, a signed commit (GraphQL `createCommitOnBranch`), and a PR titled `chore(dev-standards): sync templates to <ref>`. The README stops saying templates never re-apply. |
 | 5 | `sync.py adopt <repo>` for onboarding. Then roll out in waves: system-one, the small Python repos, fitted. |
