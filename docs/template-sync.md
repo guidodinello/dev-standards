@@ -67,8 +67,9 @@ conflicted. Edits one or more lines apart from a template change merged
 cleanly.
 
 `_exclude` patterns are rendered with Jinja (`match_exclude` in
-`copier/_main.py`), so an answer can drive a per-repo skip list. This hasn't been
-tested yet; PR5 adds the test.
+`copier/_main.py`), so an answer can drive a per-repo skip list. PR 2 uses this for
+the `release` answer (`test_release_workflow_is_opt_in`); the per-repo `skip`
+answer still needs its own test in PR 5.
 
 ## Open questions: decisions
 

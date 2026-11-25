@@ -14,7 +14,8 @@ templates/copier/.github/workflows/release.yml has a checked-in copy here for th
 
 Matches pins by identity (a pre-commit repo URL, or an action name before the
 `@`) rather than by position, so it's safe to run even when templates/ has
-unrelated text drift from the checked-in file (FIXME blocks, branch names).
+unrelated text drift from the checked-in file (rendered values such as the Python
+version or branch).
 """
 
 import re

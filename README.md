@@ -44,10 +44,14 @@ delegates to `github-standard.py --apply`. Dry run by default; every detected
 value has an override flag (`--python`, `--dev-style`, `--tests`/`--no-tests`,
 `--locked`, `--branch`); `--release` additionally renders the release workflow (see § Releases). Refuses to overwrite a file that already exists
 (`--force` to override, except `CHANGELOG.md`, which is the repo's own once it exists)
-and never touches an already-registered repo's JSON entry. Before writing to a real
-repo it refuses a dirty dev-standards checkout or a HEAD that isn't on `origin/main`
-(the answers file would record a template commit the remote doesn't have), and warns
-when the checkout is behind the remote; `--render-to` renders whatever is checked out.
+and never touches an already-registered repo's JSON entry. It writes
+`.copier-answers.yml` only when every other rendered file was written too: a file kept
+because it already existed wasn't rendered from that template commit, so the answers
+file would be wrong (`--force` renders them all; an existing `CHANGELOG.md` doesn't
+count, Copier never renders over it either). With `--apply` it refuses a dirty
+dev-standards checkout or a HEAD that isn't on `origin/main` (the answers file would
+record a template commit the remote doesn't have); a dry run only warns. It also warns
+when the checkout is behind the remote. `--render-to` renders whatever is checked out.
 
 Required status checks are deliberately **not** part of this — a check
 context has to be read off a real CI run and hand-confirmed (see

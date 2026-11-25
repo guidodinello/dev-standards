@@ -54,16 +54,14 @@ def test_detect_tests_requires_both_dir_and_pytest_dep_under_same_style(tmp_path
     assert init.detect_tests(tmp_path, pyproject, "optional") is False
 
 
-def test_render_ci_fills_fixmes_and_strips_test_job_when_excluded():
+def test_render_ci_strips_test_job_when_excluded():
     text = ci(python_version="3.13", branch="main", include_tests=False)
-    assert "# <FIXME>" not in text
     assert "test-python" not in text
     assert "branches: [main]" in text
 
 
 def test_render_ci_keeps_test_job_when_included():
     text = ci(python_version="3.13", branch="develop", include_tests=True)
-    assert "# <FIXME>" not in text
     assert "test-python" in text
     assert "branches: [develop]" in text
 
@@ -184,16 +182,55 @@ def test_answers_file_points_at_the_remote_and_records_the_answers():
     assert "install_cmd" not in answers  # computed, never stored
 
 
-def test_force_never_overwrites_a_skip_if_exists_file(tmp_path):
-    changelog = tmp_path / "CHANGELOG.md"
-    changelog.write_text("the repo's own history\n")
-    ci_file = tmp_path / CI
-    ci_file.parent.mkdir(parents=True)
-    ci_file.write_text("old\n")
-    files = {changelog: "template changelog\n", ci_file: "new\n"}
-    init.write_all(files, tmp_path, apply=True, force=True)
-    assert changelog.read_text() == "the repo's own history\n"
-    assert ci_file.read_text() == "new\n"
+def _existing(root, rel, text="the repo's own\n"):
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def _files(root):
+    return {root / rel: f"rendered {rel}\n" for rel in (ANSWERS, CI, "CHANGELOG.md")}
+
+
+def test_force_never_overwrites_a_skip_if_exists_file(tmp_path, capsys):
+    changelog = _existing(tmp_path, "CHANGELOG.md")
+    ci_file = _existing(tmp_path, CI)
+    init.write_all(_files(tmp_path), tmp_path, apply=True, force=True)
+    assert changelog.read_text() == "the repo's own\n"
+    assert ci_file.read_text() == f"rendered {CI}\n"
+    assert (tmp_path / ANSWERS).read_text() == f"rendered {ANSWERS}\n"
+    out = capsys.readouterr().out
+    assert "kept (the repo's own" in out
+    assert "pass --force" not in out  # it was passed
+
+
+def test_answers_file_is_not_written_when_a_rendered_file_was_kept(tmp_path, capsys):
+    """The answers file claims every file came from its _commit; a file kept as the
+    repo had it didn't, and a later `copier update` would merge from the wrong base."""
+    ci_file = _existing(tmp_path, CI)
+    init.write_all(_files(tmp_path), tmp_path, apply=True, force=False)
+    assert not (tmp_path / ANSWERS).exists()
+    assert ci_file.read_text() == "the repo's own\n"
+    assert (tmp_path / "CHANGELOG.md").exists()  # the rest is still written
+    out = capsys.readouterr().out
+    assert f"not writing {tmp_path / ANSWERS}" in out
+    assert CI in out
+
+
+def test_answers_file_is_written_when_only_a_skip_if_exists_file_was_kept(tmp_path):
+    """Copier itself never renders over an existing CHANGELOG.md, so keeping it
+    doesn't make the answers file's claim false."""
+    _existing(tmp_path, "CHANGELOG.md")
+    init.write_all(_files(tmp_path), tmp_path, apply=True, force=False)
+    assert (tmp_path / ANSWERS).read_text() == f"rendered {ANSWERS}\n"
+
+
+def test_dry_run_reports_the_withheld_answers_file(tmp_path, capsys):
+    _existing(tmp_path, CI)
+    init.write_all(_files(tmp_path), tmp_path, apply=False, force=False)
+    assert f"not writing {tmp_path / ANSWERS}" in capsys.readouterr().out
+    assert not (tmp_path / ANSWERS).exists()
 
 
 def _git(repo, *args):
@@ -212,7 +249,7 @@ def checkout(tmp_path):
 
 
 def test_template_checkout_on_origin_main_passes(checkout):
-    init.check_template_checkout(checkout)
+    init.check_template_checkout(checkout, apply=True)
 
 
 @pytest.mark.parametrize("dirty", ["modified", "untracked"])
@@ -220,13 +257,65 @@ def test_template_checkout_refuses_any_dirty_state(checkout, dirty):
     """Untracked files count: Copier commits them into its throwaway commit too."""
     (checkout / ("f" if dirty == "modified" else "new")).write_text("y\n")
     with pytest.raises(SystemExit):
-        init.check_template_checkout(checkout)
+        init.check_template_checkout(checkout, apply=True)
 
 
 def test_template_checkout_refuses_a_commit_not_on_origin_main(checkout):
     _git(checkout, "commit", "-q", "--allow-empty", "-m", "local only")
     with pytest.raises(SystemExit):
-        init.check_template_checkout(checkout)
+        init.check_template_checkout(checkout, apply=True)
+
+
+def test_template_checkout_only_warns_in_a_dry_run(checkout, capsys):
+    (checkout / "new").write_text("y\n")
+    init.check_template_checkout(checkout, apply=False)
+    assert "--apply would refuse" in capsys.readouterr().out
+
+
+@pytest.fixture
+def bootstrap(tmp_path, monkeypatch, capsys):
+    """Runs the real (non --render-to) bootstrap against a scratch target repo, with
+    the GitHub API calls and github-standard.json stubbed, and the dev-standards
+    checkout reported dirty and off origin/main (as on any feature branch)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text('[project]\nrequires-python = ">=3.13"\n')
+    config = tmp_path / "github-standard.json"
+    config.write_text('{"org": "o", "repos": {\n}}\n')
+    monkeypatch.setattr(init, "CONFIG_PATH", config)
+    monkeypatch.setattr(init, "preflight_gh_auth", lambda: None)
+    monkeypatch.setattr(init, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(init, "preflight_ruleset", lambda org, repo, branch: None)
+    monkeypatch.setattr(init, "print_checklist", lambda org, repo, docs_present: None)
+    dirty = {"status": " M init.py\n"}
+    monkeypatch.setattr(
+        init,
+        "_git",
+        lambda repo, *args: subprocess.CompletedProcess(args, 1, dirty.get(args[0], ""), ""),
+    )
+
+    def run(*flags: str) -> int:
+        monkeypatch.setattr("sys.argv", ["init.py", "x", "--path", str(repo), *flags])
+        return init.main()
+
+    return repo, config, run
+
+
+def test_dry_run_from_a_dirty_checkout_succeeds_and_writes_nothing(bootstrap, capsys):
+    repo, config, run = bootstrap
+    assert run() == 0
+    assert sorted(p.name for p in repo.iterdir()) == ["pyproject.toml"]
+    assert config.read_text() == '{"org": "o", "repos": {\n}}\n'
+    out = capsys.readouterr().out
+    assert "--apply would refuse" in out
+    assert "would write" in out
+
+
+def test_apply_from_a_dirty_checkout_refuses_before_writing(bootstrap):
+    repo, config, run = bootstrap
+    with pytest.raises(SystemExit):
+        run("--apply")
+    assert sorted(p.name for p in repo.iterdir()) == ["pyproject.toml"]
 
 
 def test_render_to_writes_every_file(tmp_path, monkeypatch):

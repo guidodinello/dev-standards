@@ -243,25 +243,32 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=False)
 
 
-def check_template_checkout(repo: Path) -> None:
+def check_template_checkout(repo: Path, *, apply: bool) -> None:
     """A bootstrapped repo records the template commit it was rendered from in
-    .copier-answers.yml; `copier update` later diffs from it. Refuse a render
-    whose `_commit` the remote won't have: Copier turns any uncommitted or
+    .copier-answers.yml; `copier update` later diffs from it. With --apply, refuse
+    a render whose `_commit` the remote won't have: Copier turns any uncommitted or
     untracked change into a throwaway commit, and a local-only commit is no
-    better. Warn (only) when the checkout is behind the remote main — the
+    better. A dry run writes nothing, so it only warns about what --apply would
+    refuse. Either way, warn when the checkout is behind the remote main — the
     stale-pins incident in issue #53."""
+    problems = []
     if _git(repo, "status", "--porcelain").stdout.strip():
-        log_err(
-            f"{repo} has uncommitted or untracked changes — the rendered repo would record a "
-            "template commit that exists nowhere else. Commit or stash first "
+        problems.append(
+            f"{repo} has uncommitted or untracked changes — the rendered repo would record "
+            "a template commit that exists nowhere else. Commit or stash first "
             "(--render-to renders anything)."
         )
-        sys.exit(1)
-    if _git(repo, "merge-base", "--is-ancestor", "HEAD", "origin/main").returncode != 0:
-        log_err(
+    elif _git(repo, "merge-base", "--is-ancestor", "HEAD", "origin/main").returncode != 0:
+        problems.append(
             f"{repo}'s HEAD isn't on origin/main — the rendered repo would record a template "
             "commit the remote doesn't have. Push it or switch to main first."
         )
+    for problem in problems:
+        if apply:
+            log_err(problem)
+        else:
+            log_warn(f"--apply would refuse: {problem}")
+    if problems and apply:
         sys.exit(1)
     remote = _git(repo, "ls-remote", "origin", "refs/heads/main").stdout.split()
     head = _git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -289,13 +296,33 @@ def write_rendered(path: Path, content: str, *, apply: bool, force: bool) -> boo
 
 
 def write_all(files: dict[Path, str], out_root: Path, *, apply: bool, force: bool) -> None:
-    """--force never overwrites a `_skip_if_exists` file (CHANGELOG.md): it is
-    the repo's own after the first render, as it is for `copier update`."""
+    """Writes the render. Two rules on top of write_rendered:
+    - A `_skip_if_exists` file (CHANGELOG.md) that exists is the repo's own: kept
+      even with --force, as `copier update` keeps it.
+    - .copier-answers.yml claims every other file came from this render's
+      `_commit`. If any of them is skipped because it already exists (no --force),
+      that claim would be false, and a later `copier update` would 3-way merge
+      from a base the file never had — so the answers file is not written."""
     keep = skip_if_exists_patterns()
+    answers_path = out_root / ANSWERS_FILE
+
+    def owned(path: Path) -> bool:
+        return any(fnmatch(path.relative_to(out_root).as_posix(), p) for p in keep)
+
+    kept = [path for path in files if path != answers_path and path.exists() and not force]
+    not_rendered = [path for path in kept if not owned(path)]
     for path, content in files.items():
-        rel = path.relative_to(out_root).as_posix()
-        owned = any(fnmatch(rel, pattern) for pattern in keep)
-        write_rendered(path, content, apply=apply, force=force and not owned)
+        if path == answers_path and not_rendered:
+            log_warn(
+                f"not writing {path}: these files already exist and were kept, so they "
+                f"weren't rendered from this template commit: "
+                f"{', '.join(str(p.relative_to(out_root)) for p in not_rendered)}. "
+                "Pass --force to render them too, or adopt the repo later (issue #53)."
+            )
+        elif owned(path) and path.exists():
+            log_info(f"{path} already exists — kept (the repo's own; --force doesn't touch it)")
+        else:
+            write_rendered(path, content, apply=apply, force=force)
 
 
 def _align_entry_line(repo: str, profile: str, column: int = 38) -> str:
@@ -544,7 +571,7 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
         log_info(f"Rendered to {out_root} — no JSON entry, no delegate, no API writes.")
         return 0
 
-    check_template_checkout(REPO_ROOT)
+    check_template_checkout(REPO_ROOT, apply=args.apply)
     preflight_gh_auth()
 
     config = json.loads(CONFIG_PATH.read_text())
