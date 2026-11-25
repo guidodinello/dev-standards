@@ -60,7 +60,7 @@ cleanly.
 `copier/_main.py`), so an answer can drive a per-repo skip list. This hasn't been
 tested yet; PR5 adds the test.
 
-## Open questions: recommendations
+## Open questions: decisions
 
 1. **Pin conflicts.** Decided (2026-11-25). Copier marks them as conflicts (above), so
    `sync.py` gets a post-update step that resolves a conflict hunk automatically
@@ -74,7 +74,7 @@ tested yet; PR5 adds the test.
    least from the repo's current files. Commit only that file, then run a normal
    `update`. A repo that diverged on purpose (fitted) opts out of files through a
    `skip` answer that feeds a templated `_exclude`.
-3. **Release-gated syncs.** No. Sync to `main` HEAD, which is already CI-gated.
+3. **Release-gated syncs.** Decided (2026-11-25): no. Sync to `main` HEAD, which is already CI-gated.
    Tags would add ceremony for a single owner, and `v*` tags can't be used here
    anyway (`release.yml` fires on them). If gating is ever wanted, use PEP 440
    tags without the `v` (e.g. `2026.11.25`).
