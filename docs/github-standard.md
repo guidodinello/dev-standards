@@ -296,11 +296,11 @@ version by hand (Dependabot does not track `uvx` pins).
 The job runs `--persona auditor`, which reports everything the default persona does plus
 the findings it hides (undocumented permissions, missing `concurrency`, unnamed jobs,
 secrets outside an environment). A repo documents an intentional exception with an inline
-`# zizmor: ignore[<rule>] <reason>` comment anywhere in the finding's span (a job's line
-covers that job's findings). For example, the Dependabot-only jobs in
-`dependabot-automerge.yml` and `sync-self-host-templates.yml` ignore
-`secrets-outside-env`: Dependabot-triggered runs get only Dependabot secrets, so the App
-secrets can't move into an environment. When a repo's sync PR brings this in, its own
+`# zizmor: ignore[<rule>] <reason>` comment inside the finding's span. For example, the
+Dependabot-only jobs in `dependabot-automerge.yml` and `sync-self-host-templates.yml`
+ignore `secrets-outside-env` (a job-level finding, so the comment sits on the job's line):
+Dependabot-triggered runs get only Dependabot secrets, so the App secrets can't move into
+an environment. When a repo's sync PR brings this in, its own
 workflows are audited at that level too, so expect to fix or ignore auditor findings in
 that PR.
 
