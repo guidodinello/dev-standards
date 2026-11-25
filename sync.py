@@ -1,6 +1,8 @@
 #!/usr/bin/env -S uv run
-"""sync — preview what the current dev-standards template would change in every repo
-rendered from it (issue #53). DRY RUN ONLY: it clones, never pushes.
+"""sync — bring the current dev-standards template into every repo rendered from it
+(issue #53). Dry run by default: it clones, reports and pushes nothing. With
+--apply it opens (or updates) one sync PR per repo with a real change; see
+sync_pr.py for how.
 
 For each repo in github-standard.json (read, never written) it makes a fresh,
 shallow clone of the default branch into a temp dir. A repo without a
@@ -20,9 +22,13 @@ version, but only when the two sides differ in nothing but pins (a pre-commit
 `rev`, or a SHA-pinned `uses:` with its `# vX` comment). Anything else, or a
 version it can't compare, stays a conflict.
 
+--apply skips `unchanged` and "answers only" repos (no PR for a `_commit` that
+moved without changing any file) and opens a draft for `conflicts`.
+
 Usage:
-    ./sync.py                       # every registered repo
-    ./sync.py my-repo               # just one
+    ./sync.py                       # dry run, every registered repo
+    ./sync.py my-repo               # dry run, just one
+    ./sync.py my-repo --apply       # open/update that repo's sync PR
     ./sync.py --config path/to/github-standard.json
 
 Requires: `uv` (run it from the dev-standards checkout, like init.py) and the
@@ -41,6 +47,7 @@ import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import NamedTuple
 
 try:
     from copier import run_update
@@ -51,6 +58,7 @@ except ImportError:
         "(its shebang is `uv run`) or `uv run ./sync.py`."
     )
 
+import sync_pr
 from sync_self_host import ACTION_USES, PRE_COMMIT_REV, apply_pins, extract_pins, sync_pins
 
 DEFAULT_CONFIG = Path.home() / "projects" / "dev-standards" / "github-standard.json"
@@ -75,15 +83,37 @@ class Status(Enum):
     ERROR = "error"
 
 
+class ResolvedPin(NamedTuple):
+    """One pin conflict resolved to the newer version: `ours` is the repo's value,
+    `theirs` the template's, `kept` the one that won."""
+
+    file: str
+    name: str
+    ours: str
+    theirs: str
+    kept: str
+
+
 @dataclass(frozen=True, slots=True)
 class Result:
     repo: str
     status: Status
     diff: str = ""
     answers_only: bool = False
-    pins_resolved: int = 0
+    resolved_pins: tuple[ResolvedPin, ...] = ()
     conflicted_files: tuple[str, ...] = field(default_factory=tuple)
     message: str = ""
+    # What --apply needs to turn the result into a PR (sync_pr.py).
+    base_branch: str = ""
+    base_sha: str = ""
+    old_commit: str = ""  # template commit the repo was on (.copier-answers.yml)
+    new_commit: str = ""  # template commit it was updated to
+    template_url: str = ""  # the answers' _src_path
+    changes: tuple[tuple[str, bytes | None], ...] = ()  # (path, contents | None = deleted)
+
+    @property
+    def pins_resolved(self) -> int:
+        return len(self.resolved_pins)
 
 
 # ── pin-conflict resolution (pure) ──────────────────────────────────────────
@@ -104,7 +134,9 @@ def pin_version(pin: str) -> Version | None:
         return None
 
 
-def merge_pin_only_hunk(context: str, ours: str, theirs: str) -> str | None:
+def merge_pin_only_hunk(
+    context: str, ours: str, theirs: str
+) -> tuple[str, list[tuple[str, str, str, str]]] | None:
     """Resolve one conflict hunk, or return None to leave it as a conflict.
 
     `ours` is the repo's side, `theirs` the template's; `context` is the line just
@@ -112,13 +144,15 @@ def merge_pin_only_hunk(context: str, ours: str, theirs: str) -> str | None:
     its `repo:` line. The hunk is pin-only when putting our pin values into theirs
     gives back ours exactly. Each differing pin then takes the newer version.
     Fails closed: any version it can't compare, or equal versions with different
-    SHAs, leaves the conflict."""
+    SHAs, leaves the conflict. Returns the merged hunk and, per differing pin,
+    (name, ours, theirs, kept)."""
     ours_text, theirs_text = context + ours, context + theirs
     if ours_text == theirs_text:
-        return ours
+        return ours, []
     if sync_pins(ours_text, theirs_text) != ours_text:
         return None  # differs in more than pins
     merged = ours_text
+    pins = []
     for pattern in (PRE_COMMIT_REV, ACTION_USES):
         our_pins, their_pins = extract_pins(ours_text, pattern), extract_pins(theirs_text, pattern)
         winners = {}
@@ -130,19 +164,21 @@ def merge_pin_only_hunk(context: str, ours: str, theirs: str) -> str | None:
             if our_version is None or their_version is None or our_version == their_version:
                 return None
             winners[key] = their_pin if their_version > our_version else our_pin
+            pins.append((key, our_pin, their_pin, winners[key]))
         merged = apply_pins(merged, pattern, winners)
-    return merged.removeprefix(context)
+    return merged.removeprefix(context), pins
 
 
 def _find(lines: list[str], start: int, marker: str) -> int | None:
     return next((j for j in range(start, len(lines)) if lines[j].rstrip("\n") == marker), None)
 
 
-def resolve_pin_conflicts(text: str) -> tuple[str, int, int]:
-    """(text with pin-only hunks resolved, hunks resolved, hunks left)."""
+def resolve_pin_conflicts(text: str) -> tuple[str, list[tuple[str, str, str, str]], int]:
+    """(text with pin-only hunks resolved, the pins resolved, hunks left)."""
     lines = text.splitlines(keepends=True)
     out: list[str] = []
-    resolved = left = 0
+    resolved: list[tuple[str, str, str, str]] = []
+    left = 0
     i = 0
     while i < len(lines):
         if lines[i].rstrip("\n") != CONFLICT_START:
@@ -162,8 +198,8 @@ def resolve_pin_conflicts(text: str) -> tuple[str, int, int]:
             out.extend(lines[i : end + 1])
             left += 1
         else:
-            out.extend(merged.splitlines(keepends=True))
-            resolved += 1
+            out.extend(merged[0].splitlines(keepends=True))
+            resolved.extend(merged[1])
         i = end + 1
     return "".join(out), resolved, left
 
@@ -191,6 +227,9 @@ def sync_repo(org: str, repo: str, workdir: Path) -> Result:
         if probe.returncode != 0:
             return Result(repo, Status.NOT_ONBOARDED)
         _run(["git", "checkout", "-q"], cwd=dest)
+        base_branch = _run(["git", "symbolic-ref", "--short", "HEAD"], cwd=dest).strip()
+        base_sha = _run(["git", "rev-parse", "HEAD"], cwd=dest).strip()
+        old_answers = (dest / ANSWERS_FILE).read_text()
         run_update(
             str(dest),
             defaults=True,
@@ -201,18 +240,20 @@ def sync_repo(org: str, repo: str, workdir: Path) -> Result:
             vcs_ref="HEAD",
         )
         unmerged = _run(["git", "diff", "--name-only", "--diff-filter=U"], cwd=dest).split()
-        pins_resolved = 0
+        resolved_pins = []
         conflicted = []
         for rel in unmerged:
             path = dest / rel
             text, resolved, left = resolve_pin_conflicts(path.read_text())
             path.write_text(text)
-            pins_resolved += resolved
+            resolved_pins += [ResolvedPin(rel, *pin) for pin in resolved]
             if left:
                 conflicted.append(rel)
         _run(["git", "add", "-A"], cwd=dest)
         diff = _run(["git", "diff", "--cached", "HEAD"], cwd=dest)
         changed = _run(["git", "diff", "--cached", "--name-only", "HEAD"], cwd=dest).split()
+        changes = _staged_changes(dest)
+        new_answers = (dest / ANSWERS_FILE).read_text()
     except subprocess.CalledProcessError as e:
         return Result(repo, Status.ERROR, message=(e.stderr or str(e)).strip())
     # The per-repo boundary: one repo's failure must not stop the others. Copier
@@ -234,9 +275,35 @@ def sync_repo(org: str, repo: str, workdir: Path) -> Result:
         status,
         diff=diff,
         answers_only=changed == [ANSWERS_FILE] and _only_commit_changed(diff),
-        pins_resolved=pins_resolved,
+        resolved_pins=tuple(resolved_pins),
         conflicted_files=tuple(conflicted),
+        base_branch=base_branch,
+        base_sha=base_sha,
+        old_commit=_answer(old_answers, "_commit"),
+        new_commit=_answer(new_answers, "_commit"),
+        template_url=_answer(new_answers, "_src_path"),
+        changes=changes,
     )
+
+
+def _answer(answers_text: str, key: str) -> str:
+    match = re.search(rf"^{re.escape(key)}: *(.+)$", answers_text, re.M)
+    return match.group(1).strip().strip("'\"") if match else ""
+
+
+def _staged_changes(dest: Path) -> tuple[tuple[str, bytes | None], ...]:
+    """The staged change set as (path, new contents | None for a deletion): what a
+    `createCommitOnBranch` call carries. That API has no file modes, so a mode
+    change can't be committed faithfully and fails the repo instead."""
+    summary = _run(["git", "diff", "--cached", "--summary", "HEAD"], cwd=dest)
+    if "mode change" in summary:
+        raise ValueError(f"file mode change can't be synced through the API:\n{summary}")
+    status = _run(["git", "diff", "--cached", "--name-status", "--no-renames", "HEAD"], cwd=dest)
+    changes = []
+    for line in status.splitlines():
+        kind, path = line.split("\t", 1)
+        changes.append((path, None if kind == "D" else (dest / path).read_bytes()))
+    return tuple(changes)
 
 
 def _only_commit_changed(diff: str) -> bool:
@@ -276,6 +343,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("repo", nargs="?", help="Only this registered repo.")
     parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Open (or update) a sync PR per repo with a real change. Default: dry run.",
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         default=DEFAULT_CONFIG,
@@ -290,8 +362,17 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         repos = [args.repo]
 
-    print("dev-standards template sync: DRY RUN (clones only; nothing is pushed)")
+    if args.apply:
+        problem = sync_pr.preflight()
+        if problem:
+            print(problem, file=sys.stderr)
+            return 1
+        print("dev-standards template sync: APPLY (opens or updates sync PRs)")
+    else:
+        print("dev-standards template sync: DRY RUN (clones only; nothing is pushed)")
     results = []
+    actions: dict[str, int] = {}
+    apply_failed = 0
     with tempfile.TemporaryDirectory(prefix="dev-standards-sync-") as tmp:
         for repo in repos:
             result = sync_repo(org, repo, Path(tmp))
@@ -299,13 +380,41 @@ def main(argv: list[str] | None = None) -> int:
             print(describe(result))
             if result.status in (Status.CLEAN, Status.CONFLICTS):
                 print(result.diff, end="" if result.diff.endswith("\n") else "\n")
+            if args.apply and wants_pr(result):
+                label, detail = apply(org, repo, result)
+                print(f"  apply: {label}: {detail}")
+                actions[label] = actions.get(label, 0) + 1
+                apply_failed += label == APPLY_FAILED
 
     counts = {status: sum(r.status is status for r in results) for status in Status}
     print(
         f"{len(results)} repos: "
         + ", ".join(f"{count} {status.value}" for status, count in counts.items())
     )
-    return 1 if counts[Status.ERROR] else 0
+    if args.apply:
+        done = ", ".join(f"{count} {action}" for action, count in actions.items())
+        print(f"sync PRs: {done or 'nothing to do'}")
+    return 1 if counts[Status.ERROR] or apply_failed else 0
+
+
+def wants_pr(result: Result) -> bool:
+    """A real change: clean (beyond `_commit` moving) or with conflicts left."""
+    return result.status is Status.CONFLICTS or (
+        result.status is Status.CLEAN and not result.answers_only
+    )
+
+
+APPLY_FAILED = "failed"
+
+
+def apply(org: str, repo: str, result: Result) -> tuple[str, str]:
+    """One repo's PR step as (label, detail); any failure is that repo's, and the
+    other repos continue (KeyboardInterrupt still stops the run)."""
+    try:
+        action, detail = sync_pr.apply_repo(org, repo, result)
+    except Exception as e:  # the per-repo boundary, as in sync_repo
+        return APPLY_FAILED, f"{type(e).__name__}: {e}"
+    return action.value, detail
 
 
 if __name__ == "__main__":

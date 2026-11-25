@@ -26,27 +26,6 @@ import sync
 from sync import Status
 
 
-@pytest.fixture
-def origins(monkeypatch):
-    """Repo name -> local origin repo; sync.clone_command clones from it."""
-    repos = {}
-
-    def clone_command(org, repo, dest):
-        return ["git", "clone", *sync.CLONE_FLAGS, f"file://{repos[repo]}", str(dest)]
-
-    monkeypatch.setattr(sync, "clone_command", clone_command)
-    return repos
-
-
-@pytest.fixture
-def onboarded(project, origins):
-    """(template, origin): a repo rendered from the template, registered as `repo`."""
-    template, origin = project
-    git(origin, "config", "uploadpack.allowFilter", "true")  # honour --filter=blob:none
-    origins["repo"] = origin
-    return template, origin
-
-
 def run(tmp_path, name="repo"):
     return sync.sync_repo("org", name, tmp_path / "work")
 
@@ -216,9 +195,12 @@ RUFF = "  - repo: https://github.com/astral-sh/ruff-pre-commit\n"
 
 def test_pre_commit_rev_resolves_with_the_repo_line_above_the_hunk():
     text = RUFF + hunk("    rev: v0.18.0\n", "    rev: v0.17.9\n") + "    hooks:\n"
-    resolved, n_resolved, left = sync.resolve_pin_conflicts(text)
+    resolved, pins, left = sync.resolve_pin_conflicts(text)
     assert resolved == RUFF + "    rev: v0.18.0\n    hooks:\n"
-    assert (n_resolved, left) == (1, 0)
+    assert pins == [
+        ("https://github.com/astral-sh/ruff-pre-commit", "v0.18.0", "v0.17.9", "v0.18.0")
+    ]
+    assert left == 0
 
 
 def test_each_hunk_resolves_on_its_own():
@@ -229,9 +211,9 @@ def test_each_hunk_resolves_on_its_own():
         + other
         + hunk("    rev: v3.22.0\n", "    rev: v3.21.0\n")
     )
-    resolved, n_resolved, left = sync.resolve_pin_conflicts(text)
+    resolved, pins, left = sync.resolve_pin_conflicts(text)
     assert resolved == RUFF + "    rev: v0.18.0\n" + other + "    rev: v3.22.0\n"
-    assert (n_resolved, left) == (2, 0)
+    assert (len(pins), left) == (2, 0)
 
 
 @pytest.mark.parametrize(
@@ -261,4 +243,4 @@ def test_each_hunk_resolves_on_its_own():
 )
 def test_hunks_that_are_not_comparable_pin_bumps_stay_conflicts(ours, theirs):
     text = "    steps:\n" + hunk(ours, theirs)
-    assert sync.resolve_pin_conflicts(text) == (text, 0, 1)
+    assert sync.resolve_pin_conflicts(text) == (text, [], 1)
