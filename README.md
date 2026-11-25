@@ -12,7 +12,7 @@ other repo onboarded with this tool. A repo bootstrapped now records the templat
 commit and its answers in `.copier-answers.yml`, and `./sync.py --apply` later opens a
 PR on it whenever the template changes (§ Syncing template changes). Repos
 bootstrapped before that (e.g. `herdr-routines`) have no answers file yet, so sync
-skips them until they're onboarded: see [docs/template-sync.md](docs/template-sync.md).
+skips them until `./sync.py adopt` onboards them: see [docs/template-sync.md](docs/template-sync.md).
 
 Because Dependabot only scans checked-in files, its version bumps (a
 `pre-commit-hooks` rev, a `checkout` SHA pin) never reach the `templates/copier/`
@@ -76,13 +76,15 @@ from `templates/copier/`. For a non-Python repo `init.py` doesn't cover, see
 ./sync.py my-repo --apply     # open (or update) that repo's sync PR
 ./sync.py --apply             # ... for every registered repo
 ./sync.py --config path/to/github-standard.json
+./sync.py adopt my-repo       # dry run: onboard a repo with no .copier-answers.yml
+./sync.py adopt my-repo --apply
 ```
 
 Previews what the current template (dev-standards' `main` HEAD) would change in each
 registered repo. For every repo with a `.copier-answers.yml` on its default branch it
 makes a fresh shallow clone in a temp dir (`gh repo clone`, so private repos work), runs
-`copier update`, and prints the diff. Each repo is reported as `not onboarded` (no
-answers file, skipped), `unchanged`, `clean` (flagged "answers only" when only `_commit`
+`copier update`, and prints the diff. Each repo is reported as `skipped` (opted out in
+the config, below; never cloned), `not onboarded` (no answers file), `unchanged`, `clean` (flagged "answers only" when only `_commit`
 moved), `conflicts` (Copier's inline markers are left in the diff) or `error`.
 
 When the repo's Dependabot and the template both bumped the same pin, the conflict is
@@ -122,6 +124,29 @@ default branch:
   scopes can't be read (`gh auth refresh -s workflow`).
 
 Exits 1 if any repo errored or its PR step failed; the other repos still run.
+
+To keep a repo out of template sync, give its `github-standard.json` entry a reason:
+`"template_sync": {"skip": "diverged on purpose, see ..."}`. `sync.py` reports it as
+`skipped` and `adopt` refuses it. An entry that isn't a non-empty reason is that repo's
+`error`, never a sync.
+
+### Onboarding a repo bootstrapped before Copier
+
+`./sync.py adopt my-repo` writes the `.copier-answers.yml` such a repo lacks:
+
+- **Answers** come from `init.py`'s own detection (`detect_answers`), plus `branch`
+  (the default branch), `release` (has `.github/workflows/release.yml`) and `locked`
+  (CI runs `uv sync --locked`).
+- **`_commit`** is the dev-standards commit whose render differs least from the repo's
+  files, among the `main` commits that changed the template and render the same files
+  as the current one. Ties go to the newest.
+- **The dry run** prints the answers, each candidate's score, the residual (the lines
+  that still differ from the chosen render) and the diff the first sync would make.
+  `copier update` treats the residual as the repo's own edits and keeps it in every
+  later sync, so a residual line that should follow the template is fixed by hand.
+- **`--apply`** opens a PR, on the same `dev-standards/sync` branch and with the same
+  safety rules as a sync PR, that adds only `.copier-answers.yml`. Once it merges,
+  `./sync.py my-repo --apply` opens the first sync PR.
 
 ## GitHub repo config
 
