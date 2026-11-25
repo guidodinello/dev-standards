@@ -10,6 +10,7 @@ Two jobs:
 """
 
 import itertools
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,16 +22,24 @@ from copier import run_copy, run_update
 from copier.errors import UserMessageError
 
 init = import_module_from_path("dev_standards_init", REPO_ROOT / "init.py")
+sync_self_host = import_module_from_path("sync_self_host", REPO_ROOT / "sync_self_host.py")
 
 CI = Path(".github/workflows/ci.yml")
 PRE_COMMIT = Path(".pre-commit-config.yaml")
 DELIMITERS = ("[=", "=]", "[%", "%]", "[#", "#]")
 
+# Read from the template, never written out: sync_self_host.py rewrites these pins
+# on every Dependabot bump, and a literal here would turn the update tests red.
+_CI_TEMPLATE = (REPO_ROOT / "templates" / "copier" / f"{CI}.jinja").read_text()
 # actions/cache's pin in the lint job, the one pin that appears once in ci.yml.
-CACHE_PIN = "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0"
-CACHE_PIN_B = "actions/cache@" + "b" * 40 + " # v6.2.0"
-CACHE_PIN_C = "actions/cache@" + "c" * 40 + " # v6.3.0"
-ZIZMOR = "zizmor@1.31.1"
+CACHE_PIN = (
+    "actions/cache@"
+    + sync_self_host._extract_pins(_CI_TEMPLATE, sync_self_host._ACTION_USES)["actions/cache"]
+)
+CACHE_PIN_B = "actions/cache@" + "b" * 40 + " # v99.0.0"
+CACHE_PIN_C = "actions/cache@" + "c" * 40 + " # v99.1.0"
+ZIZMOR = re.search(r"zizmor@\S+", _CI_TEMPLATE).group()
+ZIZMOR_NEXT = "zizmor@99.0.0"
 
 
 @pytest.fixture(autouse=True)
@@ -167,12 +176,12 @@ def test_update_keeps_local_edit_and_repo_only_pin_bump(project):
     template, dst = project
     edit(dst, CI, "run: uv run pytest\n", 'run: uv run pytest -m "not integration"\n', "local")
     edit(dst, CI, CACHE_PIN, CACHE_PIN_B, "dependabot bump")
-    edit_template(template, ZIZMOR, "zizmor@1.32.0")
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
 
     text = update(dst)
 
     assert not has_conflict(text)
-    assert "zizmor@1.32.0" in text  # the template change arrived
+    assert ZIZMOR_NEXT in text  # the template change arrived
     assert 'uv run pytest -m "not integration"' in text  # the local edit survived
     assert CACHE_PIN_B in text  # the repo's newer pin was not rolled back
 
@@ -211,12 +220,12 @@ def test_update_never_signs_its_own_commits(project, monkeypatch):
     commits pass --no-gpg-sign; with a gpg program that always fails, any signing
     attempt would make the update fail."""
     template, dst = project
-    edit_template(template, ZIZMOR, "zizmor@1.32.0")
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
     monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
     monkeypatch.setenv("GIT_CONFIG_KEY_1", "gpg.program")
     monkeypatch.setenv("GIT_CONFIG_VALUE_1", "false")
-    assert "zizmor@1.32.0" in update(dst)
+    assert ZIZMOR_NEXT in update(dst)
 
 
 def test_untagged_template_updates_to_head_and_ignores_non_pep440_tags(project):
@@ -229,7 +238,7 @@ def test_untagged_template_updates_to_head_and_ignores_non_pep440_tags(project):
     )
 
     git(template, "tag", "template-v1")
-    edit_template(template, ZIZMOR, "zizmor@1.32.0")
-    assert "zizmor@1.32.0" in update(dst)
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+    assert ZIZMOR_NEXT in update(dst)
     commit = yaml.safe_load(answers.read_text())["_commit"]
     assert commit == f"template-v1-1-g{git(template, 'rev-parse', '--short', 'HEAD')}"
