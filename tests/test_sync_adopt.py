@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import CI, ZIZMOR, ZIZMOR_NEXT, commit_all, edit, edit_template, git
+from conftest import CI, ZIZMOR, ZIZMOR_NEXT, commit_all, edit_template, git
 
 import sync
 import sync_adopt
@@ -130,7 +130,9 @@ def test_a_repo_on_the_newest_render_adopts_it_and_has_nothing_to_sync(legacy, t
 
 def test_a_tie_goes_to_the_newest_commit(legacy, tmp_path):
     template, _ = legacy
-    edit(template, Path("copier.yml"), "# Copier template", "# The Copier template", "comment")
+    with (template / "copier.yml").open("a") as f:  # renders the same files
+        f.write("# a comment-only template commit\n")
+    commit_all(template, "comment")
 
     adoption = adopt(tmp_path)
 
@@ -220,6 +222,22 @@ def test_a_non_python_repo_is_an_error_not_an_exit(legacy, config, capsys):
     commit_all(origin, "not Python any more")
     assert sync.main(["adopt", "repo", "--config", config()]) == 1
     assert "[error] repo: DetectionError:" in capsys.readouterr().out
+
+
+def test_a_detection_error_does_not_suggest_an_init_flag(legacy, config, capsys):
+    """adopt has no --python: the hint is init.py's alone."""
+    _, origin = legacy
+    (origin / "pyproject.toml").write_text(PYPROJECT.replace(">=3.13", "<4"))
+    commit_all(origin, "no lower bound")
+    assert sync.main(["adopt", "repo", "--config", config()]) == 1
+    out = capsys.readouterr().out
+    assert "[error] repo: DetectionError: Couldn't find a >=/==/~= lower-bound" in out
+    assert "--python" not in out
+
+
+def test_diff_lines_starting_with_dashes_or_pluses_still_count():
+    changed, _ = sync_adopt._diff("f", "a\n-- template line\n", "a\n++ repo line\n")
+    assert changed == 2
 
 
 def test_an_unregistered_repo_is_refused(config):

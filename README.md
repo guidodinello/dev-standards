@@ -127,8 +127,9 @@ Exits 1 if any repo errored or its PR step failed; the other repos still run.
 
 To keep a repo out of template sync, give its `github-standard.json` entry a reason:
 `"template_sync": {"skip": "diverged on purpose, see ..."}`. `sync.py` reports it as
-`skipped` and `adopt` refuses it. An entry that isn't a non-empty reason is that repo's
-`error`, never a sync.
+`skipped` and `adopt` refuses it. A `template_sync` entry that isn't exactly a non-empty
+`skip` reason (an empty one, a misspelled key, an extra key) is that repo's `error`,
+never a sync.
 
 ### Onboarding a repo bootstrapped before Copier
 

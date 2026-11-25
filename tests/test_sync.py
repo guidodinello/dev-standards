@@ -311,6 +311,9 @@ def test_a_skipped_repo_is_reported_with_its_reason_and_never_cloned(
         pytest.param({"template_sync": {"skip": ""}}, id="empty-reason"),
         pytest.param({"template_sync": {"skip": True}}, id="not-a-reason"),
         pytest.param({"template_sync": "skip"}, id="not-an-object"),
+        pytest.param({"template_sync": {}}, id="no-skip-key"),
+        pytest.param({"template_sync": {"skpi": "diverged"}}, id="misspelled-key"),
+        pytest.param({"template_sync": {"skip": "x", "extra": 1}}, id="extra-key"),
     ],
 )
 def test_a_malformed_skip_entry_is_an_error_and_the_repo_is_not_touched(

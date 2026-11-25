@@ -118,7 +118,9 @@ def _diff(path: str, rendered: str, current: str | None) -> tuple[int, str]:
             f"repo/{path}" if current is not None else "/dev/null",
         )
     )
-    changed = sum(1 for line in lines if line[:1] in "+-" and not line.startswith(("+++", "---")))
+    # Past the two `---`/`+++` file headers, every +/- line is a change, including a
+    # content line that itself starts with `--` or `++`.
+    changed = sum(1 for line in lines[2:] if line[:1] in "+-")
     return changed, "".join(line if line.endswith("\n") else line + "\n" for line in lines)
 
 
@@ -140,7 +142,8 @@ def _score(files: dict[str, str], dest: Path) -> tuple[int, tuple[tuple[str, int
 def candidates(template: Path, answers: dict[str, object], dest: Path) -> list[Candidate]:
     """Every first-parent commit that changed the template, newest first, rendered
     with `answers` and scored against the repo. Only commits that render the same
-    set of files as the newest one count; a commit that can't render is dropped."""
+    set of files as the newest one count. An older commit that can't render is
+    dropped; the newest must render (it defines the file set), or this raises."""
     shas = sync._run(
         ["git", "rev-list", "--first-parent", "HEAD", "--", *TEMPLATE_PATHS], cwd=template
     ).split()

@@ -34,6 +34,8 @@ Usage:
     ./sync.py my-repo --apply       # open/update that repo's sync PR
     ./sync.py --config path/to/github-standard.json
     ./sync.py adopt my-repo         # onboard a repo without .copier-answers.yml
+                                    # (a repo named `adopt` is synced as
+                                    # ./sync.py --config <path> adopt)
                                     # (dry run; --apply opens its PR): sync_adopt.py
 
 Requires: `uv` (run it from the dev-standards checkout, like init.py) and the
@@ -392,8 +394,10 @@ def skip_reason(entry: object) -> str | None:
     section = entry["template_sync"]
     if not isinstance(section, dict):
         raise ValueError("template_sync must be an object")
-    if "skip" not in section:
-        return None
+    if set(section) != {"skip"}:  # `{}` or a misspelled `skpi`: meant to skip, written wrong
+        raise ValueError(
+            f"template_sync must have exactly the key `skip`, got {sorted(section) or 'none'}"
+        )
     reason = section["skip"]
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("template_sync.skip must be a non-empty reason")

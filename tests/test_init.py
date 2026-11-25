@@ -348,6 +348,13 @@ def test_bootstrap_of_a_non_python_repo_fails_cleanly(bootstrap, capsys):
     assert "has no pyproject.toml" in capsys.readouterr().out
 
 
+def test_bootstrap_suggests_the_python_flag_when_it_cannot_detect_one(bootstrap, capsys):
+    repo, config, run = bootstrap
+    (repo / "pyproject.toml").write_text('[project]\nrequires-python = "<4"\n')
+    assert run() == 1
+    assert "lower-bound clause in requires-python='<4'. Pass --python." in capsys.readouterr().out
+
+
 def test_apply_from_a_dirty_checkout_refuses_before_writing(bootstrap):
     repo, config, run = bootstrap
     with pytest.raises(SystemExit):

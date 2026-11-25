@@ -125,7 +125,13 @@ def preflight_gh_auth() -> None:
 
 class DetectionError(ValueError):
     """The repo can't be detected (not a Python repo, no usable requires-python).
-    init.py's CLI exits on it; `sync.py adopt` reports it as that repo's error."""
+    init.py's CLI exits on it; `sync.py adopt` reports it as that repo's error.
+    `flag` names init.py's override for it, if any: only init.py has the flags, so
+    only its CLI suggests one."""
+
+    def __init__(self, message: str, flag: str | None = None) -> None:
+        super().__init__(message)
+        self.flag = flag
 
 
 def load_pyproject(repo_root: Path) -> dict:
@@ -152,8 +158,8 @@ def detect_python_version(pyproject: dict) -> str:
         if m:
             return f"{m.group(2)}.{m.group(3)}"
     raise DetectionError(
-        f"Couldn't find a >=/==/~= lower-bound clause in requires-python={requires!r}. "
-        "Pass --python."
+        f"Couldn't find a >=/==/~= lower-bound clause in requires-python={requires!r}.",
+        flag="--python",
     )
 
 
@@ -568,7 +574,7 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
             repo_root, python=args.python, dev_style=args.dev_style, tests=args.tests
         )
     except DetectionError as e:
-        log_err(str(e))
+        log_err(f"{e} Pass {e.flag}." if e.flag else str(e))
         return 1
     version = detected["python_version"]
     dev_style = detected["dev_style"]
