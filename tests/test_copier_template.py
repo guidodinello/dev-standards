@@ -29,7 +29,7 @@ _CI_TEMPLATE = (REPO_ROOT / "templates" / "copier" / f"{CI}.jinja").read_text()
 # actions/cache's pin in the lint job, the one pin that appears once in ci.yml.
 CACHE_PIN = (
     "actions/cache@"
-    + sync_self_host._extract_pins(_CI_TEMPLATE, sync_self_host._ACTION_USES)["actions/cache"]
+    + sync_self_host.extract_pins(_CI_TEMPLATE, sync_self_host.ACTION_USES)["actions/cache"]
 )
 CACHE_PIN_B = "actions/cache@" + "b" * 40 + " # v99.0.0"
 CACHE_PIN_C = "actions/cache@" + "c" * 40 + " # v99.1.0"

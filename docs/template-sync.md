@@ -76,7 +76,7 @@ answer still needs its own test in PR 5.
 1. **Pin conflicts.** Decided (2026-11-25). Copier marks them as conflicts (above), so
    `sync.py` gets a post-update step that resolves a conflict hunk automatically
    only when the two sides differ in nothing but pins. It reuses
-   `sync_self_host`'s `_PRE_COMMIT_REV` / `_ACTION_USES` patterns, and the
+   `sync_self_host`'s `PRE_COMMIT_REV` / `ACTION_USES` patterns, and the
    higher version wins. A SHA pin is compared by its `# vX` comment. Any other
    conflict stays inline, and the PR opens as a draft, so the markers fail CI
    instead of merging.
