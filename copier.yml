@@ -1,16 +1,26 @@
-# Copier template for the dev-standards baseline (issue #53). Spike scope: only
-# the CI workflow and the pre-commit config so far; init.py still renders every
-# file itself. tests/test_copier_template.py keeps this template's output
-# byte-equal to init.py's render while both exist. Findings and roadmap:
-# docs/template-sync.md.
+# Copier template for the dev-standards baseline: every file init.py renders
+# into a repo lives under templates/copier/, in the layout it lands in. Files
+# ending in .jinja are rendered; the rest are copied verbatim. Each rendered
+# repo records the template commit and these answers in .copier-answers.yml, so
+# `copier update` can later bring template changes in (docs/template-sync.md).
 _min_copier_version: "9.19.1"
 _subdirectory: templates/copier
 _templates_suffix: .jinja
 
+# The release workflow is opt-in (libraries and distributed apps only). With
+# _subdirectory set, Copier has no default excludes, so this is the whole list.
+_exclude:
+  - "[% if not release %].github/workflows/release.yml[% endif %]"
+
+# A repo's changelog is its own after the first render: never overwritten, by
+# init.py --force or by `copier update`.
+_skip_if_exists:
+  - CHANGELOG.md
+
 # Jinja's default `{{ }}` collides with GitHub Actions' `${{ }}`, and `[[ ]]`
 # with bash's `[[` in the CI job's script, so the template uses [= =] / [% %] /
 # [# #]. tests/test_copier_template.py checks none of them appear in any
-# plain file under templates/.
+# verbatim (non-.jinja) file under templates/.
 _envops:
   variable_start_string: "[="
   variable_end_string: "=]"
@@ -51,8 +61,12 @@ branch:
   help: Default branch CI runs on
   default: main
 
-# Computed, never asked or stored in .copier-answers.yml. Mirrors
-# init.install_cmd_for.
+release:
+  type: bool
+  help: Add the tag-triggered release workflow (libraries and distributed apps only)
+  default: false
+
+# Computed, never asked or stored in .copier-answers.yml.
 install_cmd:
   type: str
   when: false

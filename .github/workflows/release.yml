@@ -6,8 +6,8 @@
 #
 # Adopt only where a release means something (a library others pin, an app
 # that ships installable artifacts) — not an app repo that just tracks a
-# dependency. Python repos: cp to .github/workflows/release.yml, nothing to
-# fill in (`./init.py <repo> --release` does the cp). JS/extension repos: swap
+# dependency. Python repos: `./init.py <repo> --release` renders it, nothing
+# to fill in. JS/extension repos: cp it from dev-standards' templates/copier/, swap
 # the toolchain step and set BUILD_COMMAND / ARTIFACTS as in the commented
 # example below, e.g. pullscope's `wxt zip` for chrome + firefox.
 #

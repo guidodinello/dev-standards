@@ -5,7 +5,7 @@
 # on a schedule, for three ecosystems: your actual dependencies (uv),
 # your CI Actions pins, and your pre-commit hook revs.
 #
-# Adopt: cp to .github/dependabot.yml, adjust `directory` if the repo
+# Rendered by dev-standards' init.py. Adjust `directory` if the repo
 # isn't laid out with pyproject.toml at the root (see fitted's
 # .github/dependabot.yml for the monorepo/multi-directory shape).
 #

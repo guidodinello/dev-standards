@@ -361,11 +361,12 @@ def ci_runners_drift(intended: list[str], current: str | None) -> str | None:
 
 
 def sync_ci_runners(org: str, repo: str, repo_cfg: dict, apply: bool) -> bool:
-    """Audits/applies the CI_RUNNERS Actions variable (see templates/ci/python-ci.yml
-    and README § CI runners) that switches a repo's CI between GitHub-hosted and
-    self-hosted runners. Absent `ci_runners` in repo_cfg means unmanaged — this never
-    auto-unsets a variable a repo set by hand, and a repo simply not needing the
-    self-hosted fallback shouldn't have to declare an empty list to say so."""
+    """Audits/applies the CI_RUNNERS Actions variable (see README § CI runners and
+    templates/copier/.github/workflows/ci.yml.jinja) that switches a repo's CI
+    between GitHub-hosted and self-hosted runners. Absent `ci_runners` in repo_cfg
+    means unmanaged — this never auto-unsets a variable a repo set by hand, and a
+    repo simply not needing the self-hosted fallback shouldn't have to declare an
+    empty list to say so."""
     intended = repo_cfg.get("ci_runners")
     if intended is None:
         return False

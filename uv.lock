@@ -57,20 +57,22 @@ wheels = [
 name = "dev-standards"
 version = "0.1.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "copier" },
+]
 
 [package.dev-dependencies]
 dev = [
-    { name = "copier" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
 ]
 
 [package.metadata]
+requires-dist = [{ name = "copier", specifier = ">=9.19.1" }]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "copier", specifier = ">=9.19.1" },
     { name = "pre-commit", specifier = ">=4.7" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.13" },

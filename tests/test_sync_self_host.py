@@ -54,31 +54,28 @@ def test_sync_pins_ignores_pins_absent_from_checked_in():
 
 def test_main_is_idempotent_against_repos_own_files():
     assert sync_self_host.main() == 0
-    for _, templates in sync_self_host.PAIRS:
-        for template in templates:
-            before = template.read_text()
-            sync_self_host.main()
-            assert template.read_text() == before
+    for _, template in sync_self_host.PAIRS:
+        before = template.read_text()
+        sync_self_host.main()
+        assert template.read_text() == before
 
 
-def test_main_syncs_a_bump_into_every_template_of_a_pair(tmp_path, monkeypatch):
-    """A Dependabot bump in a checked-in file must reach the plain template and its
-    Copier twin alike; otherwise the Copier parity test goes red on every bump PR."""
+def test_main_syncs_a_bump_into_the_template(tmp_path, monkeypatch):
     checked_in = tmp_path / "ci.yml"
     checked_in.write_text("      - uses: actions/checkout@v8\n")
-    plain = tmp_path / "python-ci.yml"
-    twin = tmp_path / "ci.yml.jinja"
-    for template in (plain, twin):
-        template.write_text("      - uses: actions/checkout@v7\n")
+    template = tmp_path / "ci.yml.jinja"
+    template.write_text("      - uses: actions/checkout@v7\n")
     monkeypatch.setattr(sync_self_host, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(sync_self_host, "PAIRS", [(checked_in, (plain, twin))])
+    monkeypatch.setattr(sync_self_host, "PAIRS", [(checked_in, template)])
     sync_self_host.main()
-    assert plain.read_text() == twin.read_text() == checked_in.read_text()
+    assert template.read_text() == checked_in.read_text()
 
 
-def test_every_copier_template_is_a_sync_target():
-    targets = {t for _, templates in sync_self_host.PAIRS for t in templates}
-    twins = set((REPO_ROOT / "templates" / "copier").rglob("*.jinja"))
-    pinned = {t for t in twins if "uses:" in t.read_text() or "rev:" in t.read_text()}
+def test_every_pinned_template_is_a_sync_target():
+    """A template with pins but no checked-in twin in PAIRS would never get
+    Dependabot's bumps (test_self_host.py would catch the drift, but only after)."""
+    targets = {template for _, template in sync_self_host.PAIRS}
+    templates = [p for p in (REPO_ROOT / "templates" / "copier").rglob("*") if p.is_file()]
+    pinned = {p for p in templates if "uses:" in p.read_text() or "rev:" in p.read_text()}
     assert pinned
     assert pinned <= targets

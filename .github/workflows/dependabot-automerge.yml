@@ -7,7 +7,7 @@
 # App configured, this workflow degrades gracefully: it reports "not
 # configured" and leaves the PR for a manual merge, rather than failing.
 #
-# Adopt: cp to .github/workflows/dependabot-automerge.yml. Fully generic,
+# Rendered by dev-standards' init.py, verbatim. Fully generic,
 # no per-repo edits needed — the App ID/key come from secrets, not this file.
 name: Dependabot auto-merge
 
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   auto-merge:
-    # Same CI_RUNNERS switch as templates/ci/python-ci.yml (see README § CI runners) —
+    # Same CI_RUNNERS switch as the CI workflow (see dev-standards' README § CI runners) —
     # a private repo's GitHub-hosted minutes running out blocks this job exactly like
     # any other, and it isn't a required check, so an offline self-hosted runner only
     # delays a merge rather than blocking one.

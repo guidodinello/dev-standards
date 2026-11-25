@@ -1,15 +1,11 @@
-"""The Copier template (copier.yml + templates/copier/, issue #53 spike).
+"""The Copier template (copier.yml + templates/copier/) as Copier itself sees it.
 
-Two jobs:
-- Parity: while init.py still renders by string substitution, the Copier render
-  must be byte-equal to it, so every guard in test_init.py (SHA pins,
-  persist-credentials, CI_RUNNERS, the aggregate job) covers both.
-- Update behaviour: what `copier update` does to a repo that has its own edits
-  and its own Dependabot bumps. These pin down the facts docs/template-sync.md
-  relies on, so a Copier upgrade that changes them fails here first.
+What init.py renders is tested in test_init.py and test_self_host.py. This file
+pins down what `copier update` does to a repo that has its own edits and its own
+Dependabot bumps: the facts docs/template-sync.md relies on, so a Copier upgrade
+that changes them fails here first.
 """
 
-import itertools
 import re
 import shutil
 import subprocess
@@ -21,7 +17,6 @@ from conftest import REPO_ROOT, import_module_from_path
 from copier import run_copy, run_update
 from copier.errors import UserMessageError
 
-init = import_module_from_path("dev_standards_init", REPO_ROOT / "init.py")
 sync_self_host = import_module_from_path("sync_self_host", REPO_ROOT / "sync_self_host.py")
 
 CI = Path(".github/workflows/ci.yml")
@@ -42,18 +37,6 @@ ZIZMOR = re.search(r"zizmor@\S+", _CI_TEMPLATE).group()
 ZIZMOR_NEXT = "zizmor@99.0.0"
 
 
-@pytest.fixture(autouse=True)
-def _git_identity(monkeypatch):
-    """CI has no git identity and no GPG key, while a dev machine may sign every
-    commit. Copier's own internal commits pass --no-gpg-sign; these cover ours."""
-    for var in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{var}_NAME", "test")
-        monkeypatch.setenv(f"GIT_{var}_EMAIL", "test@example.invalid")
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("GIT_CONFIG_KEY_0", "commit.gpgsign")
-    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
-
-
 def git(cwd: Path, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
@@ -68,46 +51,9 @@ def copy_template(dst: Path) -> Path:
     return dst
 
 
-# ── parity with init.py ────────────────────────────────────────────────────
-
-INSTALL_STYLES = {  # (dev_style, locked) -> what init.install_cmd_for returns for it
-    ("groups", False): init.install_cmd_for("groups", locked=False),
-    ("groups", True): init.install_cmd_for("groups", locked=True),
-    ("optional", False): init.install_cmd_for("optional", locked=False),
-}
-MATRIX = list(itertools.product(["3.11", "3.13"], INSTALL_STYLES, [True, False], ["main", "dev"]))
-
-
 @pytest.fixture(scope="module")
 def template_dir(tmp_path_factory):
     return copy_template(tmp_path_factory.mktemp("template"))
-
-
-@pytest.mark.parametrize(("version", "style", "include_tests", "branch"), MATRIX)
-def test_copier_render_matches_init_render(
-    template_dir, tmp_path, version, style, include_tests, branch
-):
-    dev_style, locked = style
-    run_copy(
-        str(template_dir),
-        tmp_path,
-        data={
-            "python_version": version,
-            "dev_style": dev_style,
-            "locked": locked,
-            "include_tests": include_tests,
-            "branch": branch,
-        },
-        defaults=True,
-        quiet=True,
-    )
-    assert (tmp_path / CI).read_text() == init.render_ci(
-        version=version,
-        install_cmd=INSTALL_STYLES[style],
-        branch=branch,
-        include_tests=include_tests,
-    )
-    assert (tmp_path / PRE_COMMIT).read_text() == init.render_pre_commit(version)
 
 
 def test_answers_file_records_answers_but_not_computed_values(template_dir, tmp_path):
@@ -119,9 +65,8 @@ def test_answers_file_records_answers_but_not_computed_values(template_dir, tmp_
 
 
 def test_plain_templates_never_contain_the_jinja_delimiters():
-    """copier.yml's custom delimiters must not occur in any template file, or a
-    file moved into templates/copier/ would render wrong. Covers every file under
-    templates/, including the ones that join Copier later (release, automerge)."""
+    """copier.yml's custom delimiters must not occur in any verbatim template file,
+    or turning it into a .jinja one later would render it wrong."""
     for path in (REPO_ROOT / "templates").rglob("*"):
         if path.is_file() and path.suffix != ".jinja":
             text = path.read_text()
