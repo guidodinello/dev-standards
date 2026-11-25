@@ -69,7 +69,7 @@ tested yet; PR5 adds the test.
    higher version wins. A SHA pin is compared by its `# vX` comment. Any other
    conflict stays inline, and the PR opens as a draft, so the markers fail CI
    instead of merging.
-2. **Onboarding existing repos.** Write `.copier-answers.yml` from `init.py`'s
+2. **Onboarding existing repos.** Decided (2026-11-25). Write `.copier-answers.yml` from `init.py`'s
    detection. Set `_commit` to the dev-standards commit whose render differs
    least from the repo's current files. Commit only that file, then run a normal
    `update`. A repo that diverged on purpose (fitted) opts out of files through a
