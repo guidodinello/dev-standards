@@ -11,8 +11,9 @@ that commit to the repo's current files as a 3-way merge.
 `init.py` renders every file through Copier (PR 2). `sync.py` (PR 3) previews
 `copier update` on every registered repo with an answers file, and `sync.py --apply`
 (PR 4) opens or updates one signed sync PR per repo with a real change (README §
-Syncing template changes). Repos bootstrapped before PR 2 have no answers file yet
-(PR 5).
+Syncing template changes). `sync.py adopt` (PR 5, `sync_adopt.py`) onboards a repo
+bootstrapped before PR 2, which has no answers file, and a repo can opt out of sync
+in `github-standard.json` (`"template_sync": {"skip": "<reason>"}`).
 
 ```
 init.py ──detection as answers──▶ copier run_copy(this checkout, vcs_ref=HEAD)
@@ -70,8 +71,8 @@ cleanly.
 
 `_exclude` patterns are rendered with Jinja (`match_exclude` in
 `copier/_main.py`), so an answer can drive a per-repo skip list. PR 2 uses this for
-the `release` answer (`test_release_workflow_is_opt_in`); the per-repo `skip`
-answer still needs its own test in PR 5.
+the `release` answer (`test_release_workflow_is_opt_in`). A per-file `skip` answer is
+not built yet (decision 2).
 
 ## Open questions: decisions
 
@@ -90,6 +91,23 @@ answer still needs its own test in PR 5.
    least from the repo's current files. Commit only that file, then run a normal
    `update`. A repo that diverged on purpose (fitted) opts out of files through a
    `skip` answer that feeds a templated `_exclude`.
+
+   Done in PR 5 (`sync.py adopt`), with two refinements:
+   - **Candidates** are the first-parent `main` commits that changed `copier.yml` or
+     `templates/copier/` and render the same set of files as the current template.
+     An older commit that renders fewer files (the spike) would turn a later-added
+     file the repo already has into a whole-file conflict on the first sync. The score
+     is the number of differing lines (answers file and `CHANGELOG.md` excluded); ties
+     go to the newest commit.
+   - **The residual** (what still differs from the chosen render) is printed, because
+     `copier update` keeps it as the repo's own edits forever: an old CI that lacks a
+     job the template has never gets it from a sync, and a rendered file the repo
+     doesn't have counts as deleted on purpose (no sync adds it). Fix such lines by
+     hand (or `copier recopy`).
+   - **Opting out:** decided (2026-11-25) to start with a whole-repo skip list in
+     `github-standard.json`, with a reason. fitted needs such an entry (the config is
+     gitignored, so it's added by hand) before any sync or adopt run that would reach
+     it; the per-file `skip` answer comes with its wave.
 3. **Release-gated syncs.** Decided (2026-11-25): no. Sync to `main` HEAD, which is already CI-gated.
    Tags would add ceremony for a single owner, and `v*` tags can't be used here
    anyway (`release.yml` fires on them). If gating is ever wanted, use PEP 440
@@ -103,4 +121,4 @@ answer still needs its own test in PR 5.
 | 2 | Done: `init.py` renders through Copier. The answers come from the existing detection, and the CLI flags stay. The plain CI and pre-commit templates are removed, and the other files (dependabot, automerge, CODEOWNERS, CHANGELOG via `_skip_if_exists`, opt-in release) move in. Copier is a project dependency (uv.lock, bumped by Dependabot), so `init.py` runs through `uv run` (its shebang), no longer stdlib-only. |
 | 3 | Done: `sync.py`, dry run: for each repo in `github-standard.json` that has `.copier-answers.yml`, run `copier update` in a fresh clone and print the diff and any conflicts. Plus the pin post-step. |
 | 4 | Done: `sync.py --apply`: a branch, a signed commit (GraphQL `createCommitOnBranch`), and a PR titled `chore(dev-standards): sync templates to <ref>`. The README stops saying templates never re-apply. |
-| 5 | `sync.py adopt <repo>` for onboarding. Then roll out in waves: system-one, the small Python repos, fitted. |
+| 5 | Done: `sync.py adopt <repo>` for onboarding, and the config skip list. Next: roll out in waves (system-one, the small Python repos, fitted), each adopt PR then its first sync PR. |

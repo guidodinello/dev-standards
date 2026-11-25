@@ -118,6 +118,12 @@
     "my-normal-repo": {
       "profile": "baseline"
     },
+    "my-diverged-repo": {
+      "profile": "baseline",
+      "template_sync": {
+        "skip": "Keeps its own CI on purpose: sync.py and sync.py adopt leave it alone. Say why, so the skip can be revisited."
+      }
+    },
     "my-repo-with-ci": {
       "profile": "baseline",
       "branches": {

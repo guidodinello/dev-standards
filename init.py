@@ -123,15 +123,25 @@ def preflight_gh_auth() -> None:
 # ── detection ────────────────────────────────────────────────────────────
 
 
+class DetectionError(ValueError):
+    """The repo can't be detected (not a Python repo, no usable requires-python).
+    init.py's CLI exits on it; `sync.py adopt` reports it as that repo's error.
+    `flag` names init.py's override for it, if any: only init.py has the flags, so
+    only its CLI suggests one."""
+
+    def __init__(self, message: str, flag: str | None = None) -> None:
+        super().__init__(message)
+        self.flag = flag
+
+
 def load_pyproject(repo_root: Path) -> dict:
     pyproject_path = repo_root / "pyproject.toml"
     if not pyproject_path.is_file():
-        log_err(
+        raise DetectionError(
             f"{repo_root} has no pyproject.toml — init.py only bootstraps Python "
             "repos. (shell-utils is the shape a shell-flavored template would need; "
             "not built here — see the plan's 'explicitly out of scope'.)"
         )
-        sys.exit(1)
     with pyproject_path.open("rb") as f:
         return tomllib.load(f)
 
@@ -147,11 +157,10 @@ def detect_python_version(pyproject: dict) -> str:
         m = re.match(r"(>=|==|~=)\s*(\d+)\.(\d+)", clause)
         if m:
             return f"{m.group(2)}.{m.group(3)}"
-    log_err(
-        f"Couldn't find a >=/==/~= lower-bound clause in requires-python={requires!r}. "
-        "Pass --python."
+    raise DetectionError(
+        f"Couldn't find a >=/==/~= lower-bound clause in requires-python={requires!r}.",
+        flag="--python",
     )
-    sys.exit(1)
 
 
 def _dep_name(spec: str) -> str:
@@ -198,6 +207,23 @@ def detect_docs(repo_root: Path) -> bool:
     return (repo_root / "docs").is_dir()
 
 
+def detect_answers(
+    repo_root: Path,
+    *,
+    python: str | None = None,
+    dev_style: str | None = None,
+    tests: bool | None = None,
+) -> dict[str, object]:
+    """The Copier answers read from the repo itself: `python_version`, `dev_style`,
+    `include_tests`. Each override replaces its detection. The one detection path for
+    both a bootstrap and `sync.py adopt`. Raises DetectionError."""
+    pyproject = load_pyproject(repo_root)
+    version = python or detect_python_version(pyproject)
+    style = dev_style or detect_dev_style(pyproject)
+    include_tests = detect_tests(repo_root, pyproject, style) if tests is None else tests
+    return {"python_version": version, "dev_style": style, "include_tests": include_tests}
+
+
 def get_default_branch(org: str, repo: str) -> str:
     obj = gh_get(f"repos/{org}/{repo}")
     if obj and isinstance(obj, dict) and obj.get("default_branch"):
@@ -210,15 +236,24 @@ def get_default_branch(org: str, repo: str) -> str:
 # repo root), the single source of truth for every file this script writes ───
 
 
-def render(out_root: Path, answers: dict[str, object]) -> dict[Path, str]:
+def render(
+    out_root: Path,
+    answers: dict[str, object],
+    *,
+    src: Path = REPO_ROOT,
+    vcs_ref: str = "HEAD",
+    src_url: str = TEMPLATE_URL,
+) -> dict[Path, str]:
     """Render the Copier template with `answers`; returns {out_root/<rel>: content}.
 
-    Renders this checkout's HEAD (plus any uncommitted changes, which Copier
-    picks up itself), never a tag: `vcs_ref="HEAD"` keeps a future PEP 440 tag
-    from silently rendering something older than what's checked out.
+    By default renders this checkout's HEAD (plus any uncommitted changes, which
+    Copier picks up itself), never a tag: `vcs_ref="HEAD"` keeps a future PEP 440 tag
+    from silently rendering something older than what's checked out. `sync.py adopt`
+    renders older commits of a template clone (`src`, `vcs_ref`). The answers file
+    records `src_url` as `_src_path`.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        run_copy(str(REPO_ROOT), tmp, data=answers, defaults=True, quiet=True, vcs_ref="HEAD")
+        run_copy(str(src), tmp, data=answers, defaults=True, quiet=True, vcs_ref=vcs_ref)
         root = Path(tmp)
         files = {
             out_root / path.relative_to(root): path.read_text()
@@ -229,7 +264,7 @@ def render(out_root: Path, answers: dict[str, object]) -> dict[Path, str]:
     # `copier update` must work from any machine, so point it at the remote.
     answers_path = out_root / ANSWERS_FILE
     files[answers_path] = re.sub(
-        r"^_src_path: .*$", f"_src_path: {TEMPLATE_URL}", files[answers_path], count=1, flags=re.M
+        r"^_src_path: .*$", f"_src_path: {src_url}", files[answers_path], count=1, flags=re.M
     )
     return files
 
@@ -534,18 +569,22 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
         log_err(f"{repo_root} doesn't exist. Pass --path.")
         return 1
 
-    pyproject = load_pyproject(repo_root)
-    version = args.python or detect_python_version(pyproject)
-    dev_style = args.dev_style or detect_dev_style(pyproject)
+    try:
+        detected = detect_answers(
+            repo_root, python=args.python, dev_style=args.dev_style, tests=args.tests
+        )
+    except DetectionError as e:
+        log_err(f"{e} Pass {e.flag}." if e.flag else str(e))
+        return 1
+    version = detected["python_version"]
+    dev_style = detected["dev_style"]
+    include_tests = detected["include_tests"]
     # Not auto-detected from uv.lock's presence: that file is near-universal
     # once a repo uses uv at all (logger and rl-bot both have one but use
     # plain `uv sync --dev`), so it doesn't discriminate. --locked is an
     # explicit per-repo style choice — default to the template's own default
     # (unlocked) unless asked for.
     locked = bool(args.locked)
-    include_tests = (
-        detect_tests(repo_root, pyproject, dev_style) if args.tests is None else args.tests
-    )
     docs_present = detect_docs(repo_root)
 
     dev_style_label = (

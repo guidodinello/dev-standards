@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import importlib.util
 import re
 import shutil
@@ -11,6 +13,7 @@ from copier import run_copy
 import sync
 import sync_pr
 import sync_self_host
+from sync_pr import SYNC_BRANCH, GitHubError
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -158,3 +161,176 @@ def onboarded(project, origins):
     git(origin, "config", "uploadpack.allowFilter", "true")  # honour --filter=blob:none
     origins["repo"] = origin
     return template, origin
+
+
+# ── a fake GitHub for --apply (sync_pr.github replaced) ─────────────────────
+
+
+def _git_blob_sha(contents: bytes) -> str:
+    """What GitHub reports as a commit file's `sha`: git's blob id. Computed here,
+    not with sync_pr's helper, so the fake doesn't borrow the code under test."""
+    return hashlib.sha1(b"blob %d\0" % len(contents) + contents).hexdigest()
+
+
+class FakeGitHub:
+    """The endpoints sync_pr uses, over in-memory refs, commits and PRs. Commits
+    made through createCommitOnBranch are GitHub's: committer `web-flow`, verified,
+    one parent; `add_commit` stands in for anyone else's push."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict | None]] = []
+        self.refs: dict[tuple[str, str], str] = {}  # (repo, branch) -> sha
+        self.commits: dict[str, dict] = {}  # sha -> {message, parents, committer, ...}
+        self.pulls: dict[str, list[dict]] = {}
+        self.drafts_supported = True
+        self.fail_commit_for: set[str] = set()
+        self.fail_once: dict[tuple[str, str], GitHubError] = {}  # (method, path suffix)
+
+    @property
+    def writes(self) -> list[tuple[str, str, dict | None]]:
+        return [call for call in self.calls if call[0] != "GET"]
+
+    def head(self, repo: str, branch: str = SYNC_BRANCH) -> dict:
+        return self.commits[self.refs[(repo, branch)]]
+
+    def add_commit(
+        self,
+        repo: str,
+        branch: str,
+        message: str,
+        *,
+        committer: str = "a-human",
+        verified: bool = True,
+        parents: list[str] | None = None,
+        files: dict[str, str | None] | None = None,
+    ) -> str:
+        """A commit pushed by someone other than sync.py (by default on top of the
+        branch head)."""
+        sha = hashlib.sha1(f"{repo}{branch}{message}{len(self.commits)}".encode()).hexdigest()
+        self.commits[sha] = {
+            "message": message,
+            "parents": parents if parents is not None else [self.refs.get((repo, branch))],
+            "committer": committer,
+            "verified": verified,
+            "files": files or {},
+        }
+        self.refs[(repo, branch)] = sha
+        return sha
+
+    def __call__(self, method, path, payload=None):
+        self.calls.append((method, path, payload))
+        for (fail_method, suffix), error in list(self.fail_once.items()):
+            if method == fail_method and path.endswith(suffix):
+                del self.fail_once[(fail_method, suffix)]
+                raise error
+        if path == "graphql":
+            return self._create_commit(payload["variables"]["input"])
+        _org, repo, rest = re.fullmatch(r"repos/([^/]+)/([^/]+)/(.+)", path).groups()
+        if method == "GET" and rest.startswith("pulls?"):
+            for pr in self.pulls.get(repo, []):
+                if pr["state"] == "open":  # a closed PR keeps the head it closed with
+                    pr["head"]["sha"] = self.refs.get((repo, SYNC_BRANCH))
+            return self.pulls.get(repo, [])
+        if method == "GET" and rest.startswith("commits/"):
+            return self._commit_json(rest.removeprefix("commits/"))
+        if method == "GET" and rest.startswith("git/ref/heads/"):
+            sha = self.refs.get((repo, rest.removeprefix("git/ref/heads/")))
+            if sha is None:
+                raise GitHubError(404, "Not Found")
+            return {"object": {"sha": sha}}
+        if rest.startswith("git/refs/heads/"):
+            branch = rest.removeprefix("git/refs/heads/")
+            if (repo, branch) not in self.refs:
+                raise GitHubError(422, "Reference does not exist")
+            if method == "DELETE":
+                del self.refs[(repo, branch)]
+                return None
+            self.refs[(repo, branch)] = payload["sha"]
+            return {}
+        if method == "POST" and rest == "git/refs":
+            branch = payload["ref"].removeprefix("refs/heads/")
+            if (repo, branch) in self.refs:
+                raise GitHubError(422, "Reference already exists")
+            self.refs[(repo, branch)] = payload["sha"]
+            return {}
+        if method == "POST" and rest == "pulls":
+            if payload.get("draft") and not self.drafts_supported:
+                raise GitHubError(422, "Validation Failed")
+            pulls = self.pulls.setdefault(repo, [])
+            pr = {
+                "number": len(pulls) + 1,
+                "state": "open",
+                "merged_at": None,
+                "draft": bool(payload.get("draft")),
+                "title": payload["title"],
+                "body": payload["body"],
+                "base": {"ref": payload["base"]},
+                "head": {"ref": payload["head"], "sha": self.refs.get((repo, payload["head"]))},
+                "html_url": f"https://github.test/{repo}/pull/{len(pulls) + 1}",
+            }
+            pulls.append(pr)
+            return pr
+        if method == "PATCH" and rest.startswith("pulls/"):
+            pr = self.pulls[repo][int(rest.removeprefix("pulls/")) - 1]
+            pr.update(payload)
+            return pr
+        raise AssertionError(f"unexpected call {method} {path}")
+
+    def _commit_json(self, sha):
+        commit = self.commits[sha]
+        return {
+            "sha": sha,
+            "parents": [{"sha": parent} for parent in commit["parents"]],
+            "committer": {"login": commit["committer"]},
+            "commit": {
+                "message": commit["message"],
+                "verification": {"verified": commit["verified"]},
+            },
+            "files": [
+                {"filename": path, "status": "removed", "sha": None}
+                if contents is None
+                else {
+                    "filename": path,
+                    "status": "modified",
+                    "sha": _git_blob_sha(contents.encode()),
+                }
+                for path, contents in commit["files"].items()
+            ],
+        }
+
+    def _create_commit(self, data):
+        repo = data["branch"]["repositoryNameWithOwner"].split("/")[1]
+        branch = data["branch"]["branchName"]
+        if repo in self.fail_commit_for:
+            raise GitHubError(502, "Bad Gateway")
+        if self.refs.get((repo, branch)) != data["expectedHeadOid"]:
+            raise GitHubError(None, "expectedHeadOid does not match the branch head")
+        files = {
+            a["path"]: base64.b64decode(a["contents"]).decode()
+            for a in data["fileChanges"]["additions"]
+        } | {d["path"]: None for d in data["fileChanges"]["deletions"]}
+        message = data["message"]["headline"] + "\n\n" + data["message"]["body"]
+        return {
+            "data": {
+                "createCommitOnBranch": {
+                    "commit": {
+                        "oid": self.add_commit(
+                            repo,
+                            branch,
+                            message,
+                            committer="web-flow",
+                            parents=[data["expectedHeadOid"]],
+                            files=files,
+                        )
+                    }
+                }
+            }
+        }
+
+
+@pytest.fixture
+def fake(monkeypatch):
+    gh = FakeGitHub()
+    monkeypatch.setattr(sync_pr, "github", gh)
+    monkeypatch.setattr(sync_pr, "token_scopes", lambda: {"repo", "workflow"})
+    return gh
