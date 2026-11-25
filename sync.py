@@ -44,7 +44,6 @@ from pathlib import Path
 
 try:
     from copier import run_update
-    from copier.errors import CopierError
     from packaging.version import InvalidVersion, Version
 except ImportError:
     sys.exit(
@@ -216,8 +215,13 @@ def sync_repo(org: str, repo: str, workdir: Path) -> Result:
         changed = _run(["git", "diff", "--cached", "--name-only", "HEAD"], cwd=dest).split()
     except subprocess.CalledProcessError as e:
         return Result(repo, Status.ERROR, message=(e.stderr or str(e)).strip())
-    except CopierError as e:
-        return Result(repo, Status.ERROR, message=str(e))
+    # The per-repo boundary: one repo's failure must not stop the others. Copier
+    # raises more than CopierError here (ValueError for a `_commit` the template
+    # doesn't have, plumbum's ProcessExecutionError when `_src_path` can't be
+    # cloned), so catch any Exception. KeyboardInterrupt and SystemExit aren't
+    # Exceptions: Ctrl-C still stops the run.
+    except Exception as e:
+        return Result(repo, Status.ERROR, message=f"{type(e).__name__}: {e}".strip())
 
     if conflicted:
         status = Status.CONFLICTS

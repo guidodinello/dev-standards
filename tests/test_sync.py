@@ -149,6 +149,55 @@ def test_main_reports_every_repo_and_never_pushes(onboarded, origins, tmp_path, 
     assert config.read_text() == config_before  # config only read
 
 
+def _break_answers(origin, key, value):
+    path = origin / ".copier-answers.yml"
+    text = path.read_text()
+    line = next(line for line in text.splitlines() if line.startswith(f"{key}:"))
+    path.write_text(text.replace(line, f"{key}: {value}"))
+    commit_all(origin, f"break {key}")
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        pytest.param("_commit", "deadbee", id="unknown-commit"),  # ValueError in Copier
+        pytest.param(  # plumbum ProcessExecutionError: git clone of the URL fails
+            "_src_path", "file:///nonexistent/template.git", id="unreachable-template-url"
+        ),
+    ],
+)
+def test_a_failing_update_is_that_repos_error_and_the_run_continues(
+    onboarded, origins, tmp_path, capsys, key, value
+):
+    """The docstring promises the other repos still run: an exception from one
+    repo's update (not only CopierError / CalledProcessError) is reported as that
+    repo's error, and main() still syncs the next repo and prints the summary."""
+    template, origin = onboarded
+    _break_answers(origin, key, value)
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+    (tmp_path / "healthy").mkdir()
+    git(tmp_path / "healthy", "clone", "-q", str(origin), ".")
+    git(tmp_path / "healthy", "revert", "--no-edit", "HEAD")  # answers file restored
+    origins["healthy"] = tmp_path / "healthy"
+    config = tmp_path / "github-standard.json"
+    config.write_text(json.dumps({"org": "org", "repos": {"repo": {}, "healthy": {}}}))
+
+    assert sync.main(["--config", str(config)]) == 1
+    out = capsys.readouterr().out
+    assert "[error] repo: " in out
+    assert "[clean] healthy" in out
+    assert "2 repos: 0 not onboarded, 0 unchanged, 1 clean, 0 conflicts, 1 error" in out
+
+
+def test_ctrl_c_is_not_swallowed(onboarded, tmp_path, monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(sync, "run_update", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path)
+
+
 def test_main_rejects_an_unregistered_repo(tmp_path):
     config = tmp_path / "github-standard.json"
     config.write_text(json.dumps({"org": "org", "repos": {"repo": {}}}))
