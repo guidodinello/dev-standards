@@ -18,6 +18,7 @@ import pytest
 import yaml
 from conftest import REPO_ROOT, import_module_from_path
 from copier import run_copy, run_update
+from copier.errors import UserMessageError
 
 init = import_module_from_path("dev_standards_init", REPO_ROOT / "init.py")
 
@@ -201,8 +202,21 @@ def test_update_is_clean_when_both_sides_bumped_a_pin_to_the_same_version(projec
 def test_update_refuses_a_dirty_destination(project):
     _, dst = project
     (dst / CI).write_text("uncommitted\n")
-    with pytest.raises(Exception, match="dirty"):
+    with pytest.raises(UserMessageError, match="dirty"):
         update(dst)
+
+
+def test_update_never_signs_its_own_commits(project, monkeypatch):
+    """A dev machine signs every commit (commit.gpgsign=true). Copier's internal
+    commits pass --no-gpg-sign; with a gpg program that always fails, any signing
+    attempt would make the update fail."""
+    template, dst = project
+    edit_template(template, ZIZMOR, "zizmor@1.32.0")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "gpg.program")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "false")
+    assert "zizmor@1.32.0" in update(dst)
 
 
 def test_untagged_template_updates_to_head_and_ignores_non_pep440_tags(project):

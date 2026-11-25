@@ -39,7 +39,7 @@ cd <repo> && uv run --project <dev-standards> copier update --defaults --conflic
 
 ## Spike findings
 
-Verified with Copier 9.19.1. Each one is locked in by a test in `tests/test_copier_template.py`.
+Verified with Copier 9.19.1. Each row is locked in by a test in `tests/test_copier_template.py`.
 
 | Case | Result |
 |---|---|
@@ -52,12 +52,13 @@ Verified with Copier 9.19.1. Each one is locked in by a test in `tests/test_copi
 | The template has a non-PEP 440 tag (`template-v1`) | Ignored for version selection. It only shows up in `_commit`. |
 | Commit signing is on globally | Copier's internal commits pass `--no-gpg-sign`. No prompt. |
 
-Merging works line by line with 3 lines of context (Copier's `context_lines`).
-A repo edit within a few lines of a template change conflicts even when the
-two don't overlap.
+Merging works line by line. In the spike, edits on directly adjacent lines
+conflicted. Edits one or more lines apart from a template change merged
+cleanly.
 
-`_exclude` patterns are rendered with Jinja, so an answer can drive a per-repo
-skip list.
+`_exclude` patterns are rendered with Jinja (`match_exclude` in
+`copier/_main.py`), so an answer can drive a per-repo skip list. This hasn't been
+tested yet; PR5 adds the test.
 
 ## Open questions: recommendations
 
