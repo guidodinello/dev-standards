@@ -293,6 +293,17 @@ credentials.
 `zizmor`. It is in the `CI` job's `needs:`, so a finding blocks the merge. Bump its pinned
 version by hand (Dependabot does not track `uvx` pins).
 
+The job runs `--persona auditor`, which reports everything the default persona does plus
+the findings it hides (undocumented permissions, missing `concurrency`, unnamed jobs,
+secrets outside an environment). A repo documents an intentional exception with an inline
+`# zizmor: ignore[<rule>] <reason>` comment anywhere in the finding's span (a job's line
+covers that job's findings). For example, the Dependabot-only jobs in
+`dependabot-automerge.yml` and `sync-self-host-templates.yml` ignore
+`secrets-outside-env`: Dependabot-triggered runs get only Dependabot secrets, so the App
+secrets can't move into an environment. When a repo's sync PR brings this in, its own
+workflows are audited at that level too, so expect to fix or ignore auditor findings in
+that PR.
+
 ## Adding a new repo
 
 For a Python repo taking the standard CI/pre-commit/Dependabot templates, use
