@@ -62,7 +62,7 @@ tested yet; PR5 adds the test.
 
 ## Open questions: recommendations
 
-1. **Pin conflicts.** Copier marks them as conflicts (above). Recommendation:
+1. **Pin conflicts.** Decided (2026-11-25). Copier marks them as conflicts (above), so
    `sync.py` gets a post-update step that resolves a conflict hunk automatically
    only when the two sides differ in nothing but pins. It reuses
    `sync_self_host`'s `_PRE_COMMIT_REV` / `_ACTION_USES` patterns, and the
