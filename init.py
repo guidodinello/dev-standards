@@ -1,18 +1,20 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
 """init — bootstrap a Python repo onto the dev-standards baseline in one step.
 
 Why: `github-standard.py` applies GitHub *API* state (settings, security,
 branch rulesets) from `github-standard.json`, but refuses any repo that isn't
 already a key in that file. `templates/` holds the CI/pre-commit/Dependabot
-*files*, but the README only tells you to `cp` them by hand and fill in two
-<FIXME> spots. Nothing joins the two — onboarding a repo is four `cp`s, two
-hand-edits, a hand-written JSON entry, then a run of github-standard.py. That
-friction is what produced commit f44f66a ("docs(template): note two gotchas
-found rolling out to rl-tournament-notification-bot"). This closes the gap.
+*files*. Before this script, onboarding a repo was four `cp`s, two hand-edits,
+a hand-written JSON entry, then a run of github-standard.py. That friction is
+what produced commit f44f66a ("docs(template): note two gotchas found rolling
+out to rl-tournament-notification-bot"). This closes the gap.
 
-Detection is read from the target repo itself (pyproject.toml, tests/, docs/)
-so the four <FIXME>/version spots in the templates get filled automatically;
-every detected value has an override flag. Required status
+The files are a Copier template (copier.yml, templates/copier/). Detection is
+read from the target repo itself (pyproject.toml, tests/, docs/) and passed to
+Copier as answers; every detected value has an override flag. The rendered
+repo gets a .copier-answers.yml recording the template commit and the answers,
+so `copier update` can bring later template changes in (docs/template-sync.md).
+Required status
 checks are deliberately NOT part of the one-step flow: docs/github-standard.md
 is explicit that a required-check context is a job's display name, read off a
 real CI run and hand-confirmed — never auto-derived. Run --checks after the
@@ -34,8 +36,10 @@ Usage:
                                                 # prints a snippet to paste, never writes
     ./init.py my-repo --render-to /tmp/out      # render only, for diffing — no writes elsewhere
 
-Requires: `gh` CLI, authenticated with a token that has the `repo` scope
-(same preflight as github-standard.py, run only when talking to the API).
+Requires: `uv` (the shebang runs this in the project environment, which has
+Copier; run it from the dev-standards checkout), and the `gh` CLI authenticated
+with a token that has the `repo` scope (same preflight as github-standard.py,
+run only when talking to the API).
 """
 
 from __future__ import annotations
@@ -46,17 +50,29 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
+from fnmatch import fnmatch
 from pathlib import Path
+
+try:
+    import yaml
+    from copier import run_copy
+except ImportError:
+    sys.exit(
+        "init.py needs Copier: run it from the dev-standards checkout as ./init.py "
+        "(its shebang is `uv run`) or `uv run ./init.py`."
+    )
 
 GREEN = "\033[1;32m"
 YELLOW = "\033[1;33m"
 RED = "\033[1;31m"
 NC = "\033[0m"
 
-REPO_ROOT = Path(__file__).parent
-TEMPLATES = REPO_ROOT / "templates"
+REPO_ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = REPO_ROOT / "github-standard.json"
+TEMPLATE_URL = "https://github.com/guidodinello/dev-standards.git"
+ANSWERS_FILE = ".copier-answers.yml"
 
 
 def log_info(msg: str) -> None:
@@ -168,19 +184,9 @@ def detect_dev_style(pyproject: dict) -> str:
     return "groups"
 
 
-def install_cmd_for(style: str, locked: bool) -> str:
-    if style == "groups":
-        return "uv sync --locked --dev" if locked else "uv sync --dev"
-    # unlike `uv sync`, `uv pip install` doesn't create a venv on its own —
-    # without `uv venv` first, CI fails with "No virtual environment found"
-    # even though the exact same command works locally (a pre-existing
-    # .venv/ hides the gap there).
-    return 'uv venv && uv pip install -e ".[dev]"'
-
-
 def detect_tests(repo_root: Path, pyproject: dict, dev_style: str) -> bool:
     """Checked against dev_style's own dep list, not both styles: dev_style
-    is exactly what install_cmd_for() will install, so pytest declared only
+    is exactly what the rendered install step will install, so pytest declared only
     under the *other* style genuinely won't be on PATH — excluding the test
     job in that case is correct, not a detection miss."""
     has_dir = (repo_root / "tests").is_dir()
@@ -200,132 +206,77 @@ def get_default_branch(org: str, repo: str) -> str:
     return "main"
 
 
-# ── template rendering — read the real template files, don't duplicate their
-# content in this script (single source of truth stays templates/) ─────────
+# ── template rendering: Copier renders templates/copier/ (copier.yml at the
+# repo root), the single source of truth for every file this script writes ───
 
 
-def _must_replace(text: str, old: str, new: str) -> str:
-    """Like str.replace, but fails loudly if `old` isn't present. templates/
-    is edited independently of this script — if a FIXME's wording or a
-    version literal there ever changes, a silent no-op here would ship a
-    stale <FIXME>/version literal with exit code 0."""
-    if old not in text:
-        raise RuntimeError(
-            f"Expected template text not found — templates/ may have changed:\n{old!r}"
-        )
-    return text.replace(old, new)
+def render(out_root: Path, answers: dict[str, object]) -> dict[Path, str]:
+    """Render the Copier template with `answers`; returns {out_root/<rel>: content}.
 
-
-def render_pre_commit(version: str) -> str:
-    text = (TEMPLATES / "pre-commit" / "python.yaml").read_text()
-    version_nodot = version.replace(".", "")
-    text = _must_replace(text, "python3.13", f"python{version}")
-    text = _must_replace(text, "--py313-plus", f"--py{version_nodot}-plus")
-    return text
-
-
-_FIXME_INSTALL_BLOCK = (
-    "      # <FIXME> uv sync --dev assumes a [dependency-groups] dev group in\n"
-    "      # pyproject.toml. If this repo instead uses [project.optional-dependencies],\n"
-    '      # swap to: uv venv && uv pip install -e ".[dev]"\n'
-    "      # (uv pip install, unlike uv sync, doesn't create the venv itself —\n"
-    '      # omitting `uv venv` fails in CI with "No virtual environment found"\n'
-    "      # even though it works locally against a pre-existing .venv/)\n"
-    "      - name: Install dependencies\n"
-    "        run: uv sync --dev"
-)
-_FIXME_TEST_BLOCK = (
-    "      # <FIXME> adjust the test path/markers to this repo's layout\n"
-    '      # (e.g. `-m "not integration"` if it separates unit from integration).\n'
-    "      - name: Run tests\n"
-    "        run: uv run pytest"
-)
-_NO_TESTS_COMMENT = (
-    '# No "Tests (Python)" job yet — this repo has no test suite. Add one (pytest\n'
-    "# as a dev dependency, a tests/ directory) then bring that job back from the\n"
-    "# template and add it to the `CI` job's needs: list below.\n"
-)
-
-
-def render_ci(*, version: str, install_cmd: str, branch: str, include_tests: bool) -> str:
-    text = (TEMPLATES / "ci" / "python-ci.yml").read_text()
-    # Same version render_pre_commit writes into language_version — the lint
-    # job's venv must run it or pre-commit can't build that hook's env.
-    text = _must_replace(text, 'python-version: "3.13"', f'python-version: "{version}"')
-
-    resolved_install = f"      - name: Install dependencies\n        run: {install_cmd}"
-    text = _must_replace(text, _FIXME_INSTALL_BLOCK, resolved_install)
-    # The test job's own (uncommented) install line, only reached if that
-    # job survives below — resolve it too so both jobs use the same command.
-    text = _must_replace(text, "        run: uv sync --dev", f"        run: {install_cmd}")
-    text = _must_replace(
-        text,
-        _FIXME_TEST_BLOCK,
-        "      - name: Run tests\n        run: uv run pytest",
+    Renders this checkout's HEAD (plus any uncommitted changes, which Copier
+    picks up itself), never a tag: `vcs_ref="HEAD"` keeps a future PEP 440 tag
+    from silently rendering something older than what's checked out.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        run_copy(str(REPO_ROOT), tmp, data=answers, defaults=True, quiet=True, vcs_ref="HEAD")
+        root = Path(tmp)
+        files = {
+            out_root / path.relative_to(root): path.read_text()
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
+        }
+    # Copier records the source it was given (this local path). A later
+    # `copier update` must work from any machine, so point it at the remote.
+    answers_path = out_root / ANSWERS_FILE
+    files[answers_path] = re.sub(
+        r"^_src_path: .*$", f"_src_path: {TEMPLATE_URL}", files[answers_path], count=1, flags=re.M
     )
-    text = _must_replace(text, "branches: [main]", f"branches: [{branch}]")
-
-    if not include_tests:
-        start = "\n  test-python:"
-        end = "\n  # Single stable check name"
-        if start not in text or end not in text:
-            raise RuntimeError(f"Expected {start!r}/{end!r} markers not found — templates/ changed")
-        before, _, rest = text.partition(start)
-        _, _, after = rest.partition(end)
-        text = before.rstrip("\n") + "\n" + end + after
-        text = _must_replace(text, "      - test-python\n", "")
-        text = _must_replace(
-            text,
-            "# Adopt: cp to .github/workflows/ci.yml, fill in the two <FIXME> spots,\n",
-            "# Adopt: cp to .github/workflows/ci.yml, fill in the <FIXME> spot,\n",
-        )
-        text = _must_replace(text, "jobs:\n", f"jobs:\n{_NO_TESTS_COMMENT}")
-
-    return text
-
-
-def render_dependabot() -> str:
-    return (TEMPLATES / "dependabot" / "python.yml").read_text()
-
-
-def render_automerge() -> str:
-    return (TEMPLATES / "dependabot" / "automerge.yml").read_text()
-
-
-def render_release() -> str:
-    return (TEMPLATES / "release" / "release.yml").read_text()
-
-
-def render_codeowners() -> str:
-    return (TEMPLATES / "github" / "CODEOWNERS").read_text()
-
-
-def render_changelog() -> str:
-    return (TEMPLATES / "github" / "CHANGELOG.md").read_text()
-
-
-def rendered_files(
-    out_root: Path,
-    *,
-    version: str,
-    install_cmd: str,
-    branch: str,
-    include_tests: bool,
-    release: bool,
-) -> dict[Path, str]:
-    files = {
-        out_root / ".pre-commit-config.yaml": render_pre_commit(version),
-        out_root / ".github" / "workflows" / "ci.yml": render_ci(
-            version=version, install_cmd=install_cmd, branch=branch, include_tests=include_tests
-        ),
-        out_root / ".github" / "dependabot.yml": render_dependabot(),
-        out_root / ".github" / "workflows" / "dependabot-automerge.yml": render_automerge(),
-        out_root / ".github" / "CODEOWNERS": render_codeowners(),
-        out_root / "CHANGELOG.md": render_changelog(),
-    }
-    if release:
-        files[out_root / ".github" / "workflows" / "release.yml"] = render_release()
     return files
+
+
+def skip_if_exists_patterns() -> list[str]:
+    """copier.yml's `_skip_if_exists`: files a repo owns after the first render."""
+    return yaml.safe_load((REPO_ROOT / "copier.yml").read_text()).get("_skip_if_exists", [])
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=False)
+
+
+def check_template_checkout(repo: Path, *, apply: bool) -> None:
+    """A bootstrapped repo records the template commit it was rendered from in
+    .copier-answers.yml; `copier update` later diffs from it. With --apply, refuse
+    a render whose `_commit` the remote won't have: Copier turns any uncommitted or
+    untracked change into a throwaway commit, and a local-only commit is no
+    better. A dry run writes nothing, so it only warns about what --apply would
+    refuse. Either way, warn when the checkout is behind the remote main — the
+    stale-pins incident in issue #53."""
+    problems = []
+    if _git(repo, "status", "--porcelain").stdout.strip():
+        problems.append(
+            f"{repo} has uncommitted or untracked changes — the rendered repo would record "
+            "a template commit that exists nowhere else. Commit or stash first "
+            "(--render-to renders anything)."
+        )
+    elif _git(repo, "merge-base", "--is-ancestor", "HEAD", "origin/main").returncode != 0:
+        problems.append(
+            f"{repo}'s HEAD isn't on origin/main — the rendered repo would record a template "
+            "commit the remote doesn't have. Push it or switch to main first."
+        )
+    for problem in problems:
+        if apply:
+            log_err(problem)
+        else:
+            log_warn(f"--apply would refuse: {problem}")
+    if problems and apply:
+        sys.exit(1)
+    remote = _git(repo, "ls-remote", "origin", "refs/heads/main").stdout.split()
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    if remote and remote[0] != head:
+        log_warn(
+            "This dev-standards checkout isn't at the remote main — templates may be stale. "
+            "`git pull` first unless that's intended."
+        )
 
 
 # ── writing ──────────────────────────────────────────────────────────────
@@ -342,6 +293,36 @@ def write_rendered(path: Path, content: str, *, apply: bool, force: bool) -> boo
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     return True
+
+
+def write_all(files: dict[Path, str], out_root: Path, *, apply: bool, force: bool) -> None:
+    """Writes the render. Two rules on top of write_rendered:
+    - A `_skip_if_exists` file (CHANGELOG.md) that exists is the repo's own: kept
+      even with --force, as `copier update` keeps it.
+    - .copier-answers.yml claims every other file came from this render's
+      `_commit`. If any of them is skipped because it already exists (no --force),
+      that claim would be false, and a later `copier update` would 3-way merge
+      from a base the file never had — so the answers file is not written."""
+    keep = skip_if_exists_patterns()
+    answers_path = out_root / ANSWERS_FILE
+
+    def owned(path: Path) -> bool:
+        return any(fnmatch(path.relative_to(out_root).as_posix(), p) for p in keep)
+
+    kept = [path for path in files if path != answers_path and path.exists() and not force]
+    not_rendered = [path for path in kept if not owned(path)]
+    for path, content in files.items():
+        if path == answers_path and not_rendered:
+            log_warn(
+                f"not writing {path}: these files already exist and were kept, so they "
+                f"weren't rendered from this template commit: "
+                f"{', '.join(str(p.relative_to(out_root)) for p in not_rendered)}. "
+                "Pass --force to render them too, or adopt the repo later (issue #53)."
+            )
+        elif owned(path) and path.exists():
+            log_info(f"{path} already exists — kept (the repo's own; --force doesn't touch it)")
+        else:
+            write_rendered(path, content, apply=apply, force=force)
 
 
 def _align_entry_line(repo: str, profile: str, column: int = 38) -> str:
@@ -450,7 +431,7 @@ ACTIONS_APP_ID = 15368  # GitHub Actions' own app id, pinned so no other app can
 
 def has_aggregate_ci_job(workflow_text: str | None) -> bool:
     """True if the workflow has a job named `CI` that `needs:` other jobs and runs
-    `if: always()` (the aggregate pattern from templates/ci/python-ci.yml). A bare
+    `if: always()` (the aggregate pattern from the CI template). A bare
     check-run called "CI" proves nothing — only the workflow shows it gates on the rest."""
     if not workflow_text:
         return False
@@ -482,7 +463,8 @@ def checks_snippet(
     return (
         [{"context": c} for c in sorted({c["name"] for c in check_runs})],
         "No aggregate `CI` job in .github/workflows/ci.yml — listing per-job contexts. "
-        "Adopt the aggregate job from templates/ci/python-ci.yml, then re-run --checks "
+        "Adopt the aggregate job from dev-standards' CI template "
+        "(templates/copier/.github/workflows/ci.yml.jinja), then re-run --checks "
         "to require the single pinned `CI` context instead.",
     )
 
@@ -565,7 +547,6 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
         detect_tests(repo_root, pyproject, dev_style) if args.tests is None else args.tests
     )
     docs_present = detect_docs(repo_root)
-    install_cmd = install_cmd_for(dev_style, locked)
 
     dev_style_label = (
         "dependency-groups" if dev_style == "groups" else "project.optional-dependencies"
@@ -575,23 +556,22 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
         f"{'locked' if locked else 'unlocked'}, tests {'present' if include_tests else 'absent'}, "
         f"docs/ {'present' if docs_present else 'absent'}"
     )
+    answers = {
+        "python_version": version,
+        "dev_style": dev_style,
+        "locked": locked,
+        "include_tests": include_tests,
+        "release": args.release,
+    }
 
     if args.render_to is not None:
-        branch = args.branch or "main"
         out_root = args.render_to
-        files = rendered_files(
-            out_root,
-            version=version,
-            install_cmd=install_cmd,
-            branch=branch,
-            include_tests=include_tests,
-            release=args.release,
-        )
-        for path, content in files.items():
-            write_rendered(path, content, apply=args.apply, force=args.force)
+        files = render(out_root, {**answers, "branch": args.branch or "main"})
+        write_all(files, out_root, apply=args.apply, force=args.force)
         log_info(f"Rendered to {out_root} — no JSON entry, no delegate, no API writes.")
         return 0
 
+    check_template_checkout(REPO_ROOT, apply=args.apply)
     preflight_gh_auth()
 
     config = json.loads(CONFIG_PATH.read_text())
@@ -599,17 +579,8 @@ def run_bootstrap_mode(args: argparse.Namespace) -> int:
     branch = args.branch or get_default_branch(org, args.repo)
     preflight_ruleset(org, args.repo, branch)
 
-    out_root = repo_root
-    files = rendered_files(
-        out_root,
-        version=version,
-        install_cmd=install_cmd,
-        branch=branch,
-        include_tests=include_tests,
-        release=args.release,
-    )
-    for path, content in files.items():
-        write_rendered(path, content, apply=args.apply, force=args.force)
+    files = render(repo_root, {**answers, "branch": branch})
+    write_all(files, repo_root, apply=args.apply, force=args.force)
 
     splice_repos_entry(args.repo, args.profile, apply=args.apply)
 

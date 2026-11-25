@@ -1,5 +1,5 @@
 # Baseline CI for a small/single-package Python repo — mirrors the pre-commit
-# baseline (templates/pre-commit/python.yaml) as a required gate, since
+# baseline (.pre-commit-config.yaml) as a required gate, since
 # pre-commit itself only runs locally and CI is the only place a required
 # check can actually enforce it. Deliberately just lint + test: no
 # typecheck (add a "Typecheck Python" job with pyright/mypy once the repo
@@ -7,12 +7,8 @@
 # dorny/paths-filter once this repo is a monorepo with independent
 # subprojects — not needed for a single package).
 #
-[% if include_tests %]
-# Adopt: cp to .github/workflows/ci.yml, fill in the two <FIXME> spots,
-[% else %]
-# Adopt: cp to .github/workflows/ci.yml, fill in the <FIXME> spot,
-[% endif %]
-# then require ONLY the aggregate `CI` job below in the branch ruleset, pinned
+# Rendered by dev-standards' init.py (Copier). Once it has run green,
+# require ONLY the aggregate `CI` job below in the branch ruleset, pinned
 # to the GitHub Actions app: {"context": "CI", "integration_id": 15368} in
 # github-standard.json (integration_id stops another app from satisfying it).
 # Per-job/per-matrix-leg contexts (e.g. "Tests (Python) (3.13)") silently stop

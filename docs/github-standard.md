@@ -93,8 +93,8 @@ context out of `required_status_checks`.
 ### CI runners
 
 A repo entry can declare `"ci_runners": [...]` — a list of GitHub Actions runner
-labels — to manage the `CI_RUNNERS` Actions variable that `templates/ci/python-ci.yml`
-and `templates/dependabot/automerge.yml` both read
+labels — to manage the `CI_RUNNERS` Actions variable that `templates/copier/.github/workflows/ci.yml.jinja`
+and `templates/copier/.github/workflows/dependabot-automerge.yml` both read
 (`runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}`). See
 README § CI runners for what it's for and the manual `gh variable` equivalent.
 
@@ -133,7 +133,7 @@ abstraction serving a single consumer. Promote a shape into a named profile once
 
 ## Required checks — one pinned `CI` context
 
-Require a single context, the aggregate `CI` job from `templates/ci/python-ci.yml`
+Require a single context, the aggregate `CI` job from `templates/copier/.github/workflows/ci.yml.jinja`
 (job id `ci`, name `CI`, `needs:` every other job, `if: always()`, fails on any
 failure or cancellation), pinned to the GitHub Actions app:
 
@@ -188,11 +188,11 @@ misleading per-repo 403s.
 
 ## Dependabot
 
-`templates/dependabot/` has three files: `python.yml` (version updates — uv (pyproject.toml + uv.lock), pre-commit
-hook revs, GitHub Actions pins, weekly), `npm.yml` (version updates for npm/pnpm/yarn
-repos, plus a `security-updates` group so every currently-fixable vulnerability alert
+Three Dependabot templates: `templates/copier/.github/dependabot.yml` (version updates — uv (pyproject.toml + uv.lock), pre-commit
+hook revs, GitHub Actions pins, weekly), `templates/dependabot/npm.yml` (version updates for npm/pnpm/yarn
+repos, copied by hand since init.py only renders Python repos, plus a `security-updates` group so every currently-fixable vulnerability alert
 lands as one PR instead of one per CVE — see the file's own header for why), and
-`automerge.yml` (patch/minor auto-merge, major and github-actions bumps stay manual; ecosystem-agnostic, works
+`templates/copier/.github/workflows/dependabot-automerge.yml` (patch/minor auto-merge, major and github-actions bumps stay manual; ecosystem-agnostic, works
 as-is for either language template). The version-update groups are distinct from the
 vulnerability-alert/automated-security-fix *settings* this script already manages via
 the API — those settings control whether Dependabot acts at all; the templates control
@@ -246,13 +246,13 @@ this template before the App is set up isn't broken, just not yet automated.
 
 Only repos where a release means something — a library others pin, an app that ships
 installable artifacts — cut releases. An app that merely tracks a dependency (catan,
-truco-py) doesn't, and doesn't adopt `templates/release/release.yml`.
+truco-py) doesn't, and doesn't adopt `templates/copier/.github/workflows/release.yml`.
 
 - **Versioning:** [SemVer](https://semver.org). The manifest version (`pyproject.toml`
   `[project].version` or `package.json` `version`) is static and is the single source of
   truth for it.
 - **Changelog:** a curated [Keep a Changelog](https://keepachangelog.com) `CHANGELOG.md`
-  (`templates/github/CHANGELOG.md`) is the source of the release notes. Written by
+  (`templates/copier/CHANGELOG.md`) is the source of the release notes. Written by
   hand, not generated from commit messages — which is why release-please and
   semantic-release are deliberately not used.
 - **Cutting a release:**
@@ -274,7 +274,7 @@ truco-py) doesn't, and doesn't adopt `templates/release/release.yml`.
   Dependabot scans it, and `sync_self_host.py` propagates its bumps (SHA and tag
   comment) into the template.
 - **Adopting:** `./init.py <repo> --release` adds the workflow for a Python repo; for
-  JS repos `cp templates/release/release.yml` and swap the toolchain step and the two
+  JS repos `cp templates/copier/.github/workflows/release.yml` and swap the toolchain step and the two
   env values as the template's comments show. It is opt-in and not part of the default
   bootstrap.
 
@@ -289,7 +289,7 @@ reviewed by hand (see [Dependabot](#dependabot)). `tests/test_init.py` fails if 
 rendered or checked-in workflow has an unpinned `uses:` or a checkout that persists
 credentials.
 
-`templates/ci/python-ci.yml` includes a blocking `Audit workflows` job running a pinned
+`templates/copier/.github/workflows/ci.yml.jinja` includes a blocking `Audit workflows` job running a pinned
 `zizmor`. It is in the `CI` job's `needs:`, so a finding blocks the merge. Bump its pinned
 version by hand (Dependabot does not track `uvx` pins).
 

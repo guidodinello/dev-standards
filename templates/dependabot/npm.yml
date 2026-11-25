@@ -1,13 +1,14 @@
 # Dependabot baseline for a single-package npm/pnpm/yarn repo (package-ecosystem
 # "npm" covers all three — Dependabot detects the lockfile itself). Two concerns,
-# kept separate the same way python.yml does:
+# kept separate the same way the Python template does
+# (templates/copier/.github/dependabot.yml):
 #
 # - a `security-updates` group so every currently-fixable vulnerability alert
 #   lands as ONE PR instead of one per CVE. Without this, Dependabot's default
 #   is one alert -> one PR, which is how a repo ends up with 40+ open alerts
 #   that nobody works through one at a time.
 # - a `dependencies` group for routine version-update currency, same as
-#   python.yml's weekly grouped bump.
+#   the Python template's weekly grouped bump.
 #
 # Adopt: cp to .github/dependabot.yml, adjust `directory` if package.json
 # isn't at the repo root (see url-shortener's frontend/ layout).

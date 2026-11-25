@@ -3,21 +3,23 @@
 Repo governance and engineering standards, applied consistently across every repo I
 own — as opposed to hand-configuring each one and letting them drift.
 
-This repo self-hosts its own baseline (`pyproject.toml`, `.pre-commit-config.yaml`,
-`.github/workflows/ci.yml`, `.github/dependabot.yml`) rendered from its own
-`templates/` via `./init.py dev-standards --render-to`, the same as any other repo
-onboarded with this tool. Repos already bootstrapped from an earlier version of
-`templates/` (e.g. `herdr-routines`) are unaffected — `init.py` only renders at
-bootstrap time and never re-applies itself to a repo later, so picking up template
-changes there is a manual re-run, not automatic. Syncing template changes into
-existing repos with Copier is in progress: see [docs/template-sync.md](docs/template-sync.md).
+The templates are a [Copier](https://copier.readthedocs.io/) template: `copier.yml`
+plus `templates/copier/`, laid out as the files land in a repo (`.jinja` files are
+rendered, the rest copied verbatim). This repo self-hosts its own baseline
+(`.pre-commit-config.yaml`, `.github/workflows/ci.yml`, `.github/dependabot.yml`, ...)
+rendered from that template via `./init.py dev-standards --render-to`, the same as any
+other repo onboarded with this tool. A repo bootstrapped now records the template
+commit and its answers in `.copier-answers.yml`; nothing applies later template
+changes to it yet. Repos bootstrapped before that (e.g. `herdr-routines`) have no
+answers file. Syncing template changes into existing repos is in progress: see
+[docs/template-sync.md](docs/template-sync.md).
 
 Because Dependabot only scans checked-in files, its version bumps (a
-`pre-commit-hooks` rev, a `checkout` SHA pin) never reach the `templates/` copy
-they were rendered from, which `tests/test_self_host.py` then catches as
+`pre-commit-hooks` rev, a `checkout` SHA pin) never reach the `templates/copier/`
+file they were rendered from, which `tests/test_self_host.py` then catches as
 drift. `.github/workflows/sync-self-host-templates.yml` runs `sync_self_host.py`
 on Dependabot's own PRs to propagate the bump automatically (reusing the same
-GitHub App as `automerge.yml`, for the same GITHUB_TOKEN-permissions reason —
+GitHub App as `dependabot-automerge.yml`, for the same GITHUB_TOKEN-permissions reason —
 see docs/github-standard.md § Dependabot); without that App configured, run
 `./sync_self_host.py` by hand when that test goes red. The same applies to
 `.github/workflows/release.yml`, a checked-in copy of the release template kept only
@@ -31,15 +33,25 @@ here, since that workflow would run.
 ./init.py my-repo --path ~/other/dir --apply
 ```
 
+Run it from this checkout: the shebang is `uv run`, which runs it in this project's
+environment, where Copier is a dependency (`uv run ./init.py` works the same).
+
 One command instead of the manual sequence below: detects Python version,
 dev-dependency style, and test presence from the target repo's own
-`pyproject.toml`/layout; renders the four templates with those values filled
-in; adds a `{"profile": "baseline"}` entry to `github-standard.json`; then
+`pyproject.toml`/layout; renders the Copier template with those values as its
+answers (plus `.copier-answers.yml`); adds a `{"profile": "baseline"}` entry to `github-standard.json`; then
 delegates to `github-standard.py --apply`. Dry run by default; every detected
 value has an override flag (`--python`, `--dev-style`, `--tests`/`--no-tests`,
 `--locked`, `--branch`); `--release` additionally renders the release workflow (see § Releases). Refuses to overwrite a file that already exists
-(`--force` to override) and never touches an already-registered repo's JSON
-entry.
+(`--force` to override, except `CHANGELOG.md`, which is the repo's own once it exists)
+and never touches an already-registered repo's JSON entry. It writes
+`.copier-answers.yml` only when every other rendered file was written too: a file kept
+because it already existed wasn't rendered from that template commit, so the answers
+file would be wrong (`--force` renders them all; an existing `CHANGELOG.md` doesn't
+count, Copier never renders over it either). With `--apply` it refuses a dirty
+dev-standards checkout or a HEAD that isn't on `origin/main` (the answers file would
+record a template commit the remote doesn't have); a dry run only warns. It also warns
+when the checkout is behind the remote. `--render-to` renders whatever is checked out.
 
 Required status checks are deliberately **not** part of this — a check
 context has to be read off a real CI run and hand-confirmed (see
@@ -51,9 +63,10 @@ script won't touch automatically. You paste it into your local, gitignored
 `github-standard.json` — there is no PR for that step, and `--checks` needs the repo's
 entry to exist already (it refuses an unregistered repo).
 
-The manual `cp` recipes below still work and are what `init.py` runs under
-the hood — reach for them if you're adopting only one piece, or on a non-Python
-repo `init.py` doesn't cover (see `shell-utils` for that shape).
+To adopt only one piece, render to a scratch dir and copy the file you want
+(`./init.py my-repo --render-to /tmp/out --apply`), or `cp` a verbatim file straight
+from `templates/copier/`. For a non-Python repo `init.py` doesn't cover, see
+`shell-utils` for that shape.
 
 ## GitHub repo config
 
@@ -71,26 +84,24 @@ branch rulesets) plus an idempotent audit/apply script. Full rationale: [docs/gi
 
 ## CI / pre-commit templates
 
-```bash
-cp templates/pre-commit/python.yaml <repo>/.pre-commit-config.yaml
-cp templates/ci/python-ci.yml       <repo>/.github/workflows/ci.yml
-```
+`templates/copier/.pre-commit-config.yaml.jinja` and
+`templates/copier/.github/workflows/ci.yml.jinja`, rendered by `init.py` (see above).
 
 Baseline for a Python repo with no CI yet (or a thin one) — lint (ruff) + test
 (pytest), mirrored between local pre-commit and a required CI gate. An aggregate
 `CI` job `needs:` every other job, so the ruleset requires that one context
 (pinned `integration_id` 15368) instead of a list that rots when jobs are renamed. Deliberately
 narrow: no typecheck, no path filtering — see the comments at the top of each
-template for when to add them. Copy and genericize, don't symlink — CI workflows
-are repo-specific enough (dependency install command, test markers) that a template
-needs a few `<FIXME>` spots filled in per repo, unlike the guideline files a sibling
-tool (`push-guidelines.sh`, in `claude-dotfiles`) keeps byte-identical across repos.
+template for when to add them. Rendered per repo, not symlinked: the Python version,
+install command, branch and test job vary per repo (the Copier answers), unlike the
+guideline files a sibling tool (`push-guidelines.sh`, in `claude-dotfiles`) keeps
+byte-identical across repos.
 
 ## Releases
 
 ```bash
 ./init.py my-repo --release --apply      # adds .github/workflows/release.yml
-cp templates/release/release.yml <repo>/.github/workflows/release.yml   # JS repos
+cp templates/copier/.github/workflows/release.yml <repo>/.github/workflows/   # JS repos
 ```
 
 Opt-in, for libraries and distributed apps only. A pushed `vX.Y.Z` tag becomes a GitHub
@@ -102,7 +113,7 @@ sdist via `uv build`; JS/extension: a `BUILD_COMMAND`/`ARTIFACTS` hook), with
 
 ## CI runners
 
-`templates/ci/python-ci.yml` and `templates/dependabot/automerge.yml` both read the
+The CI and Dependabot auto-merge workflows (`templates/copier/.github/workflows/`) both read the
 `CI_RUNNERS` repo variable to pick where their jobs run:
 
 ```yaml
@@ -115,7 +126,7 @@ refuses to start with "recent account payments have failed or your spending limi
 needs to be increased" (hit on `truco`). A public repo has unlimited free minutes and
 needs none of this.
 
-`automerge.yml` follows the same variable rather than staying pinned to
+`dependabot-automerge.yml` follows the same variable rather than staying pinned to
 `ubuntu-latest`: the billing block hits it exactly like any other job on a private
 repo, and it only runs `dependabot/fetch-metadata` and `gh`, both of which work on
 the homelab runner (`gh` and the actions' bundled node ship with the runner install).
@@ -185,8 +196,8 @@ Caveats, in order of how likely they are to actually bite:
 ## Dependabot
 
 ```bash
-cp templates/dependabot/python.yml     <repo>/.github/dependabot.yml
-cp templates/dependabot/automerge.yml  <repo>/.github/workflows/dependabot-automerge.yml
+cp templates/copier/.github/dependabot.yml                      <repo>/.github/
+cp templates/copier/.github/workflows/dependabot-automerge.yml  <repo>/.github/workflows/
 ```
 
 Version-update PRs (uv + pre-commit hook revs + GitHub Actions pins, weekly),
@@ -198,5 +209,5 @@ Distinct from the
 vulnerability-alert/automated-security-fix settings `github-standard.py` already
 turns on via the API — those are security-only; this is routine currency. Needs
 `allow_auto_merge: true` at the repo level, already in the baseline settings.
-`automerge.yml` is fully generic, copy verbatim; `python.yml` needs its `directory`
+`dependabot-automerge.yml` is fully generic; `dependabot.yml` needs its `directory`
 adjusted for anything but a single-package repo with `pyproject.toml` at the root.

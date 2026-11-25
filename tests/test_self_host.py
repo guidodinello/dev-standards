@@ -1,39 +1,27 @@
-"""Keeps this repo's own checked-in config files honest against templates/.
+"""Keeps this repo's own checked-in config files honest against templates/copier/.
 
-This repo bootstraps ITSELF from its own templates (see README § self-hosting).
-Without this test, Dependabot bumping a pin in the root .pre-commit-config.yaml
-(or ci.yml) would silently diverge from templates/ — the exact "possibly-outdated
-pinned versions baked into templates/" problem this baseline was meant to fix,
-just relocated. When this test goes red, propagate the bump into templates/ too.
+This repo bootstraps ITSELF from its own Copier template (see README § self-hosting),
+with the answers in conftest.SELF_HOST_ANSWERS. Without this test, Dependabot
+bumping a pin in the root .pre-commit-config.yaml (or ci.yml) would silently
+diverge from the template — the exact "possibly-outdated pinned versions baked into
+templates/" problem this baseline was meant to fix, just relocated. When this test
+goes red, propagate the bump into templates/copier/ too (./sync_self_host.py).
 """
 
-from conftest import REPO_ROOT, import_module_from_path
+import pytest
+from conftest import REPO_ROOT, rendered
 
-init = import_module_from_path("dev_standards_init", REPO_ROOT / "init.py")
-
-
-def test_pre_commit_config_matches_template():
-    checked_in = (REPO_ROOT / ".pre-commit-config.yaml").read_text()
-    assert checked_in == init.render_pre_commit("3.13")
-
-
-def test_ci_workflow_matches_template():
-    checked_in = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    assert checked_in == init.render_ci(
-        version="3.13", install_cmd="uv sync --dev", branch="main", include_tests=True
-    )
+SELF_HOST_FILES = [
+    ".pre-commit-config.yaml",
+    ".github/workflows/ci.yml",
+    ".github/dependabot.yml",
+    ".github/workflows/dependabot-automerge.yml",
+    # Checked in only so Dependabot scans its SHA pins; this repo cuts no releases.
+    ".github/workflows/release.yml",
+    ".github/CODEOWNERS",
+]
 
 
-def test_dependabot_config_matches_template():
-    checked_in = (REPO_ROOT / ".github" / "dependabot.yml").read_text()
-    assert checked_in == init.render_dependabot()
-
-
-def test_dependabot_automerge_matches_template():
-    checked_in = (REPO_ROOT / ".github" / "workflows" / "dependabot-automerge.yml").read_text()
-    assert checked_in == init.render_automerge()
-
-
-def test_release_workflow_matches_template():
-    checked_in = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
-    assert checked_in == init.render_release()
+@pytest.mark.parametrize("rel", SELF_HOST_FILES)
+def test_checked_in_file_matches_template(rel):
+    assert (REPO_ROOT / rel).read_text() == rendered()[rel]

@@ -9,12 +9,13 @@ tests/test_self_host.py fails loudly when that happens; this script is the
 fix, applied automatically by .github/workflows/sync-self-host-templates.yml
 on Dependabot's own PRs (see that workflow for why it can push at all).
 
-templates/release/release.yml has a checked-in copy here for the same reason
+templates/copier/.github/workflows/release.yml has a checked-in copy here for the same reason
 (Dependabot must see its SHA pins), though this repo never cuts releases.
 
 Matches pins by identity (a pre-commit repo URL, or an action name before the
 `@`) rather than by position, so it's safe to run even when templates/ has
-unrelated text drift from the checked-in file (FIXME blocks, branch names).
+unrelated text drift from the checked-in file (rendered values such as the Python
+version or branch).
 """
 
 import re
@@ -32,28 +33,17 @@ _PRE_COMMIT_REV = re.compile(r"(repo:\s*(\S+)\n\s*rev:\s*)(\S+)")
 # carry their tag there (`@<sha> # v7`), and Dependabot bumps both together.
 _ACTION_USES = re.compile(r"(uses:\s*([^@\s]+)@)(\S+(?:[ \t]+#[^\n]*)?)")
 
-# Each checked-in file feeds every template rendered into it: the plain
-# templates/ file init.py reads, and its Copier twin under templates/copier/
-# (issue #53 spike; both exist until init.py renders through Copier).
-COPIER = REPO_ROOT / "templates/copier"
+# Checked-in file -> the templates/copier/ file it is rendered from.
+TEMPLATE = REPO_ROOT / "templates/copier"
 PAIRS = [
-    (
-        REPO_ROOT / ".pre-commit-config.yaml",
-        (
-            REPO_ROOT / "templates/pre-commit/python.yaml",
-            COPIER / ".pre-commit-config.yaml.jinja",
-        ),
-    ),
-    (
-        REPO_ROOT / ".github/workflows/ci.yml",
-        (REPO_ROOT / "templates/ci/python-ci.yml", COPIER / ".github/workflows/ci.yml.jinja"),
-    ),
+    (REPO_ROOT / ".pre-commit-config.yaml", TEMPLATE / ".pre-commit-config.yaml.jinja"),
+    (REPO_ROOT / ".github/workflows/ci.yml", TEMPLATE / ".github/workflows/ci.yml.jinja"),
     (
         REPO_ROOT / ".github/workflows/dependabot-automerge.yml",
-        (REPO_ROOT / "templates/dependabot/automerge.yml",),
+        TEMPLATE / ".github/workflows/dependabot-automerge.yml",
     ),
     # Checked in only so Dependabot scans its SHA pins; it fires on `v*` tags.
-    (REPO_ROOT / ".github/workflows/release.yml", (REPO_ROOT / "templates/release/release.yml",)),
+    (REPO_ROOT / ".github/workflows/release.yml", TEMPLATE / ".github/workflows/release.yml"),
 ]
 
 
@@ -78,17 +68,14 @@ def sync_pins(checked_in_text: str, template_text: str) -> str:
 
 def main() -> int:
     changed = []
-    for checked_in, templates in PAIRS:
-        if not checked_in.exists():
+    for checked_in, template in PAIRS:
+        if not checked_in.exists() or not template.exists():
             continue
-        for template in templates:
-            if not template.exists():
-                continue
-            template_text = template.read_text()
-            updated = sync_pins(checked_in.read_text(), template_text)
-            if updated != template_text:
-                template.write_text(updated)
-                changed.append(template.relative_to(REPO_ROOT))
+        template_text = template.read_text()
+        updated = sync_pins(checked_in.read_text(), template_text)
+        if updated != template_text:
+            template.write_text(updated)
+            changed.append(template.relative_to(REPO_ROOT))
 
     for path in changed:
         print(f"synced: {path}")
