@@ -24,11 +24,19 @@ on:
       - ".github/workflows/dependabot-automerge.yml"
       - ".github/workflows/release.yml"
 
+# One run at a time per PR, never cancelled mid-push; other PRs' runs are untouched.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
-  sync:
+  # secrets-outside-env is ignored for the same reason as dependabot-automerge.yml: this
+  # job only runs on Dependabot's PRs, which get Dependabot secrets and no environment ones.
+  sync: # zizmor: ignore[secrets-outside-env] Dependabot runs get no environment secrets
+    name: Sync templates
     runs-on: ubuntu-latest
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     env:
