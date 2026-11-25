@@ -271,3 +271,19 @@ def test_apply_without_the_workflow_scope_stops_before_cloning(
     assert sync.main(["adopt", "repo", "--apply", "--config", config()]) == 1
     assert "workflow" in capsys.readouterr().err
     assert fake.calls == []
+
+
+def test_a_rendered_file_the_repo_lacks_stays_missing_and_is_flagged(legacy, tmp_path):
+    """Copier takes a file the base render has and the repo doesn't as deleted on
+    purpose: the first sync doesn't add it back. The report says so."""
+    template, origin = legacy
+    (origin / ".github" / "CODEOWNERS").unlink()
+    commit_all(origin, "no CODEOWNERS")
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+
+    adoption = adopt(tmp_path)
+
+    assert ".github/CODEOWNERS" in [path for path, _, _ in adoption.chosen.residual]
+    assert "CODEOWNERS" not in adoption.preview.diff
+    assert f"+        run: uvx {ZIZMOR_NEXT}" in adoption.preview.diff
+    assert "(missing here: no sync will add it)" in sync_adopt.report(adoption)

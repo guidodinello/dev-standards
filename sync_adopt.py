@@ -209,6 +209,12 @@ def _answers_line(answers: dict[str, object]) -> str:
     return ", ".join(f"{key}={value}" for key, value in answers.items())
 
 
+def _missing(diff: str) -> bool:
+    """The residual diff of a rendered file the repo doesn't have. Copier takes it as
+    deleted on purpose: `copier update` doesn't add it back."""
+    return "\n+++ /dev/null\n" in diff
+
+
 def report(adoption: Adoption) -> str:
     chosen = adoption.chosen
     lines = [
@@ -223,7 +229,11 @@ def report(adoption: Adoption) -> str:
             "  kept as this repo's own edits by every later sync (fix by hand to take "
             "the template's version):"
         )
-        lines += [f"    {path}: {changed} line(s)" for path, changed, _ in chosen.residual]
+        lines += [
+            f"    {path}: {changed} line(s)"
+            + (" (missing here: no sync will add it)" if _missing(diff) else "")
+            for path, changed, diff in chosen.residual
+        ]
         lines += [diff.rstrip("\n") for _, _, diff in chosen.residual]
     lines.append(f"  first sync after the adopt PR merges: {sync.describe(adoption.preview)}")
     if adoption.preview.diff:

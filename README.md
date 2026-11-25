@@ -143,7 +143,11 @@ To keep a repo out of template sync, give its `github-standard.json` entry a rea
 - **The dry run** prints the answers, each candidate's score, the residual (the lines
   that still differ from the chosen render) and the diff the first sync would make.
   `copier update` treats the residual as the repo's own edits and keeps it in every
-  later sync, so a residual line that should follow the template is fixed by hand.
+  later sync (a rendered file the repo lacks stays missing), so a residual line that
+  should follow the template is fixed by hand.
+- **A wrong answer** is fixed in `.copier-answers.yml` on the PR branch before merging.
+  Closing the PR instead makes a re-run at the same template commit skip it as
+  declined.
 - **`--apply`** opens a PR, on the same `dev-standards/sync` branch and with the same
   safety rules as a sync PR, that adds only `.copier-answers.yml`. Once it merges,
   `./sync.py my-repo --apply` opens the first sync PR.

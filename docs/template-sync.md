@@ -101,11 +101,13 @@ not built yet (decision 2).
      go to the newest commit.
    - **The residual** (what still differs from the chosen render) is printed, because
      `copier update` keeps it as the repo's own edits forever: an old CI that lacks a
-     job the template has never gets it from a sync. Fix such lines by hand (or
-     `copier recopy`).
+     job the template has never gets it from a sync, and a rendered file the repo
+     doesn't have counts as deleted on purpose (no sync adds it). Fix such lines by
+     hand (or `copier recopy`).
    - **Opting out:** decided (2026-11-25) to start with a whole-repo skip list in
-     `github-standard.json`, with a reason. fitted stays skipped there until its wave;
-     the per-file `skip` answer comes with it.
+     `github-standard.json`, with a reason. fitted needs such an entry (the config is
+     gitignored, so it's added by hand) before any sync or adopt run that would reach
+     it; the per-file `skip` answer comes with its wave.
 3. **Release-gated syncs.** Decided (2026-11-25): no. Sync to `main` HEAD, which is already CI-gated.
    Tags would add ceremony for a single owner, and `v*` tags can't be used here
    anyway (`release.yml` fires on them). If gating is ever wanted, use PEP 440
