@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - CI template's `setup-uv` steps no longer upload the uv cache on persistent homelab runners (`enable-cache: ${{ !contains(runner.name, 'homelab') }}`, ported from fitted Issue 361): the HP box keeps `~/.cache/uv` on disk and shares it across runners, so the upload compressed and pushed ~900 MB per run (11 of 11 minutes of `Lint Python` on system-one's first run). Ephemeral runners, including self-hosted services like Ubicloud, still cache.
+- CI template's pre-commit `actions/cache` step is skipped on persistent homelab runners (`if: ${{ !contains(runner.name, 'homelab') }}`): `~/.cache/pre-commit` is already on the HP box's disk, and restoring or saving it there cost ~90 s per config change and CPU on a shared box.
 
 ## [0.1.0] - YYYY-MM-DD
 
