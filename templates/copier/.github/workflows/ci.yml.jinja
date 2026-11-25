@@ -1,0 +1,196 @@
+# Baseline CI for a small/single-package Python repo — mirrors the pre-commit
+# baseline (templates/pre-commit/python.yaml) as a required gate, since
+# pre-commit itself only runs locally and CI is the only place a required
+# check can actually enforce it. Deliberately just lint + test: no
+# typecheck (add a "Typecheck Python" job with pyright/mypy once the repo
+# has real type-annotation coverage), no path filtering (add
+# dorny/paths-filter once this repo is a monorepo with independent
+# subprojects — not needed for a single package).
+#
+[% if include_tests %]
+# Adopt: cp to .github/workflows/ci.yml, fill in the two <FIXME> spots,
+[% else %]
+# Adopt: cp to .github/workflows/ci.yml, fill in the <FIXME> spot,
+[% endif %]
+# then require ONLY the aggregate `CI` job below in the branch ruleset, pinned
+# to the GitHub Actions app: {"context": "CI", "integration_id": 15368} in
+# github-standard.json (integration_id stops another app from satisfying it).
+# Per-job/per-matrix-leg contexts (e.g. "Tests (Python) (3.13)") silently stop
+# gating when a job or matrix is renamed; `CI` is stable and fails if any job
+# it needs failed or was cancelled, so a new job only needs adding to its
+# `needs:` list.
+#
+# Every action is SHA-pinned (tag as a trailing comment) and checkout drops its
+# credentials; the zizmor job audits that. See docs/github-standard.md
+# § Supply chain.
+#
+# Deliberately not in this baseline (add per repo if wanted): `uv sync
+# --locked` (init.py --locked), and an actionlint job (docker:// needs Docker
+# on the runner, which would turn a Docker-less self-hosted runner into a
+# merge block — add it once the repo writes its own workflows).
+#
+# Before the first push, check the target repo actually has what this
+# workflow assumes — two gaps found rolling this out the first time:
+#   - `ruff`/`pytest`/`pre-commit` must be in the project's own dev dependency
+#     group. A repo that only runs ruff through pre-commit's isolated hook env
+#     (or pre-commit from a global install) doesn't have it on
+#     `uv sync --dev`'s PATH; CI fails with "Failed to spawn: `ruff`" even
+#     though pre-commit works fine locally.
+#   - ruff >=0.13 formats fenced Python code blocks inside Markdown by
+#     default. `ruff format --check .` at a repo root with a docs/ folder
+#     will try to reformat illustrative code snippets in prose. Add
+#     `extend-exclude = ["docs"]` (or wherever non-source markdown lives)
+#     under `[tool.ruff]` in pyproject.toml — fixes it for local
+#     pre-commit and editors too, not just this workflow.
+name: CI
+
+on:
+  push:
+    branches: [[= branch =]]
+  pull_request:
+    branches: [[= branch =]]
+  workflow_dispatch:
+
+# Superseded pull_request runs are cancelled. Every other event (push to main,
+# workflow_dispatch) gets a unique group, so it is never cancelled or replaced
+# by a newer pending run -- GitHub drops a pending run in the same group even
+# with cancel-in-progress false, which could leave a main commit with no CI.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Default GITHUB_TOKEN scope for every job below — neither lints nor tests
+# writes anything (no comments, no pushes, no packages). Least privilege.
+permissions:
+  contents: read
+
+jobs:
+[% if not include_tests %]
+# No "Tests (Python)" job yet — this repo has no test suite. Add one (pytest
+# as a dev dependency, a tests/ directory) then bring that job back from the
+# template and add it to the `CI` job's needs: list below.
+[% endif %]
+  lint-python:
+    name: Lint Python
+    # Runner pool is switchable per repo without editing this file: set the
+    # CI_RUNNERS repo variable to a JSON array of runner labels — e.g.
+    # ["self-hosted","linux","x64"] — to route CI off GitHub-hosted runners
+    # when their minutes are unavailable (on a private repo, exhausting the
+    # free tier makes every job refuse to start). Unset means ubuntu-latest.
+    # See dev-standards' README § CI runners for the commands.
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          # Persistent homelab runners (named homelab-*) keep ~/.cache/uv on disk, so uploading
+          # it is slow and pointless there; keyed on the runner name, not runner.environment,
+          # because ephemeral self-hosted services (Ubicloud) need the cache (fitted Issue 361).
+          enable-cache: ${{ !contains(runner.name, 'homelab') }}
+          cache-dependency-glob: "uv.lock"
+          # Must match the language_version in .pre-commit-config.yaml: without
+          # it uv builds the venv on the newest Python requires-python allows,
+          # and pre-commit can't find the python3.X a hook asks for.
+          python-version: "[= python_version =]"
+
+      - name: Install dependencies
+        run: [= install_cmd =]
+
+      - name: ruff format check
+        run: uv run ruff format --check .
+
+      - name: ruff lint
+        run: uv run ruff check .
+
+      # Hook envs live in ~/.cache/pre-commit, outside setup-uv's cache. The
+      # key covers the config (hook revs, language_version); pre-commit
+      # rebuilds an env whose interpreter has since changed on its own.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        # Persistent homelab runners keep ~/.cache/pre-commit on disk; restoring or
+        # saving it through actions/cache only costs time there (same reasoning as
+        # setup-uv's enable-cache above, fitted Issue 361).
+        if: ${{ !contains(runner.name, 'homelab') }}
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      # Runs the whole .pre-commit-config.yaml, so the hygiene hooks
+      # (end-of-file-fixer, trailing-whitespace, check-yaml/toml/json, ...) gate
+      # merges too; a hookless clone, --no-verify or the web editor skips them
+      # locally. pre-commit is a dev dependency, so uv.lock pins its version.
+      - name: pre-commit hooks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+  # Audits the workflow files with zizmor. It is in the `CI` job's needs:, so a
+  # finding blocks the merge. The version is pinned so a new upstream audit
+  # cannot turn this red between runs; Dependabot does not bump a `uvx` pin, so
+  # bump it by hand.
+  # GH_TOKEN is the read-only workflow token; it enables the online audits that
+  # check each pinned SHA really belongs to the tagged repo.
+  audit-workflows:
+    name: Audit workflows
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uvx zizmor@1.31.1 --format=github .github/workflows
+
+[% if include_tests %]
+  test-python:
+    name: Tests (Python)
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          # Persistent homelab runners (named homelab-*) keep ~/.cache/uv on disk, so uploading
+          # it is slow and pointless there; keyed on the runner name, not runner.environment,
+          # because ephemeral self-hosted services (Ubicloud) need the cache (fitted Issue 361).
+          enable-cache: ${{ !contains(runner.name, 'homelab') }}
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: [= install_cmd =]
+
+      - name: Run tests
+        run: uv run pytest
+
+[% endif %]
+  # Single stable check name for the branch ruleset (see header comment).
+  # if: always() so it still runs (and fails) when a needed job fails; a
+  # skipped required check would count as passing.
+  ci:
+    name: CI
+    needs:
+      - lint-python
+[% if include_tests %]
+      - test-python
+[% endif %]
+      - audit-workflows
+    if: always()
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Check results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          read -ra results <<< "$RESULTS"
+          for r in "${results[@]}"; do
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "A required job finished as: $r"
+              exit 1
+            fi
+          done

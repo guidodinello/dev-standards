@@ -1,0 +1,66 @@
+# Copier template for the dev-standards baseline (issue #53). Spike scope: only
+# the CI workflow and the pre-commit config so far; init.py still renders every
+# file itself. tests/test_copier_template.py keeps this template's output
+# byte-equal to init.py's render while both exist. Findings and roadmap:
+# docs/template-sync.md.
+_min_copier_version: "9.19.1"
+_subdirectory: templates/copier
+_templates_suffix: .jinja
+
+# Jinja's default `{{ }}` collides with GitHub Actions' `${{ }}`, and `[[ ]]`
+# with bash's `[[` in the CI job's script, so the template uses [= =] / [% %] /
+# [# #]. tests/test_copier_template.py checks none of them appear in any
+# plain file under templates/.
+_envops:
+  variable_start_string: "[="
+  variable_end_string: "=]"
+  block_start_string: "[%"
+  block_end_string: "%]"
+  comment_start_string: "[#"
+  comment_end_string: "#]"
+  trim_blocks: true
+  lstrip_blocks: true
+  keep_trailing_newline: true
+
+python_version:
+  type: str
+  help: Python version (lower bound of requires-python), e.g. 3.13
+  default: "3.13"
+  validator: "[% if not (python_version | regex_search('^3[.][0-9]+$')) %]Use the 3.X form[% endif %]"
+
+dev_style:
+  type: str
+  help: Where the dev dependencies live
+  choices:
+    "[dependency-groups] dev (uv sync --dev)": groups
+    "[project.optional-dependencies] dev (uv pip install -e .[dev])": optional
+  default: groups
+
+locked:
+  type: bool
+  help: Add --locked to uv sync
+  default: false
+
+include_tests:
+  type: bool
+  help: Include the pytest job (needs a tests/ dir and pytest as a dev dependency)
+  default: true
+
+branch:
+  type: str
+  help: Default branch CI runs on
+  default: main
+
+# Computed, never asked or stored in .copier-answers.yml. Mirrors
+# init.install_cmd_for.
+install_cmd:
+  type: str
+  when: false
+  default: >-
+    [%- if dev_style == 'optional' -%]
+    uv venv && uv pip install -e ".[dev]"
+    [%- elif locked -%]
+    uv sync --locked --dev
+    [%- else -%]
+    uv sync --dev
+    [%- endif -%]

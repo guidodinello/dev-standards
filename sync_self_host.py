@@ -32,15 +32,28 @@ _PRE_COMMIT_REV = re.compile(r"(repo:\s*(\S+)\n\s*rev:\s*)(\S+)")
 # carry their tag there (`@<sha> # v7`), and Dependabot bumps both together.
 _ACTION_USES = re.compile(r"(uses:\s*([^@\s]+)@)(\S+(?:[ \t]+#[^\n]*)?)")
 
+# Each checked-in file feeds every template rendered into it: the plain
+# templates/ file init.py reads, and its Copier twin under templates/copier/
+# (issue #53 spike; both exist until init.py renders through Copier).
+COPIER = REPO_ROOT / "templates/copier"
 PAIRS = [
-    (REPO_ROOT / ".pre-commit-config.yaml", REPO_ROOT / "templates/pre-commit/python.yaml"),
-    (REPO_ROOT / ".github/workflows/ci.yml", REPO_ROOT / "templates/ci/python-ci.yml"),
+    (
+        REPO_ROOT / ".pre-commit-config.yaml",
+        (
+            REPO_ROOT / "templates/pre-commit/python.yaml",
+            COPIER / ".pre-commit-config.yaml.jinja",
+        ),
+    ),
+    (
+        REPO_ROOT / ".github/workflows/ci.yml",
+        (REPO_ROOT / "templates/ci/python-ci.yml", COPIER / ".github/workflows/ci.yml.jinja"),
+    ),
     (
         REPO_ROOT / ".github/workflows/dependabot-automerge.yml",
-        REPO_ROOT / "templates/dependabot/automerge.yml",
+        (REPO_ROOT / "templates/dependabot/automerge.yml",),
     ),
     # Checked in only so Dependabot scans its SHA pins; it fires on `v*` tags.
-    (REPO_ROOT / ".github/workflows/release.yml", REPO_ROOT / "templates/release/release.yml"),
+    (REPO_ROOT / ".github/workflows/release.yml", (REPO_ROOT / "templates/release/release.yml",)),
 ]
 
 
@@ -65,14 +78,17 @@ def sync_pins(checked_in_text: str, template_text: str) -> str:
 
 def main() -> int:
     changed = []
-    for checked_in, template in PAIRS:
-        if not checked_in.exists() or not template.exists():
+    for checked_in, templates in PAIRS:
+        if not checked_in.exists():
             continue
-        template_text = template.read_text()
-        updated = sync_pins(checked_in.read_text(), template_text)
-        if updated != template_text:
-            template.write_text(updated)
-            changed.append(template.relative_to(REPO_ROOT))
+        for template in templates:
+            if not template.exists():
+                continue
+            template_text = template.read_text()
+            updated = sync_pins(checked_in.read_text(), template_text)
+            if updated != template_text:
+                template.write_text(updated)
+                changed.append(template.relative_to(REPO_ROOT))
 
     for path in changed:
         print(f"synced: {path}")

@@ -9,7 +9,8 @@ This repo self-hosts its own baseline (`pyproject.toml`, `.pre-commit-config.yam
 onboarded with this tool. Repos already bootstrapped from an earlier version of
 `templates/` (e.g. `herdr-routines`) are unaffected — `init.py` only renders at
 bootstrap time and never re-applies itself to a repo later, so picking up template
-changes there is a manual re-run, not automatic.
+changes there is a manual re-run, not automatic. Syncing template changes into
+existing repos with Copier is in progress: see [docs/template-sync.md](docs/template-sync.md).
 
 Because Dependabot only scans checked-in files, its version bumps (a
 `pre-commit-hooks` rev, a `checkout` SHA pin) never reach the `templates/` copy
