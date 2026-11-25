@@ -453,6 +453,8 @@ def test_ci_audit_job_survives_render_and_is_required(include_tests):
     assert "      - audit-workflows\n" in needs
     zizmor_step = text[text.index("name: zizmor") :]
     assert "continue-on-error" not in zizmor_step.split("run:")[0]
+    run_line = zizmor_step[zizmor_step.index("run:") :].split("\n")[0]
+    assert "--persona auditor" in run_line  # keeps #60's hardening from regressing
 
 
 def test_automerge_policy():
