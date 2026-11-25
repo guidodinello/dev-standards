@@ -9,10 +9,10 @@ rendered, the rest copied verbatim). This repo self-hosts its own baseline
 (`.pre-commit-config.yaml`, `.github/workflows/ci.yml`, `.github/dependabot.yml`, ...)
 rendered from that template via `./init.py dev-standards --render-to`, the same as any
 other repo onboarded with this tool. A repo bootstrapped now records the template
-commit and its answers in `.copier-answers.yml`; nothing applies later template
-changes to it yet. Repos bootstrapped before that (e.g. `herdr-routines`) have no
-answers file. Syncing template changes into existing repos is in progress: see
-[docs/template-sync.md](docs/template-sync.md).
+commit and its answers in `.copier-answers.yml`, and `./sync.py --apply` later opens a
+PR on it whenever the template changes (§ Syncing template changes). Repos
+bootstrapped before that (e.g. `herdr-routines`) have no answers file yet, so sync
+skips them until they're onboarded: see [docs/template-sync.md](docs/template-sync.md).
 
 Because Dependabot only scans checked-in files, its version bumps (a
 `pre-commit-hooks` rev, a `checkout` SHA pin) never reach the `templates/copier/`
@@ -68,11 +68,13 @@ To adopt only one piece, render to a scratch dir and copy the file you want
 from `templates/copier/`. For a non-Python repo `init.py` doesn't cover, see
 `shell-utils` for that shape.
 
-## Syncing template changes (dry run)
+## Syncing template changes
 
 ```bash
-./sync.py                     # every repo in ~/projects/dev-standards/github-standard.json
-./sync.py my-repo             # one registered repo
+./sync.py                     # dry run: every repo in ~/projects/dev-standards/github-standard.json
+./sync.py my-repo             # dry run: one registered repo
+./sync.py my-repo --apply     # open (or update) that repo's sync PR
+./sync.py --apply             # ... for every registered repo
 ./sync.py --config path/to/github-standard.json
 ```
 
@@ -86,10 +88,31 @@ moved), `conflicts` (Copier's inline markers are left in the diff) or `error`.
 When the repo's Dependabot and the template both bumped the same pin, the conflict is
 resolved to the newer version, but only when the two sides differ in nothing but pins (a
 pre-commit `rev`, or a SHA-pinned `uses:` with its `# vX` comment). Anything else stays
-a conflict. It is a dry run only: it reads `github-standard.json`, clones, and deletes
-the clones; it never creates a branch, pushes or opens a PR. Opening the sync PRs is
-the next step (see [docs/template-sync.md](docs/template-sync.md)). Exits 1 if any repo
-errored.
+a conflict. Without `--apply` it is a dry run: it reads `github-standard.json`, clones,
+and deletes the clones; it never creates a branch, pushes or opens a PR.
+
+`--apply` opens one PR per repo with a real change, titled `chore(dev-standards): sync
+templates to <template commit>`, from the branch `dev-standards/sync` into the repo's
+default branch:
+
+- The commit is made through GitHub's API (`createCommitOnBranch`), so GitHub signs
+  it and rulesets that require signed commits accept it. The PR body links the
+  template range, lists the changed files and any pins resolved, and links issue #53.
+- `unchanged` and "answers only" repos get no PR.
+- `conflicts` get a draft PR listing the conflicted files. Where drafts aren't
+  available (private repos on GitHub Free), a normal PR titled `[conflicts] ...` that
+  says not to merge; the markers keep CI red either way.
+- Re-running is safe. An open sync PR that already holds the same result is left as
+  is; if the template or the default branch moved, its branch is rebuilt as one fresh
+  commit on the default branch and the PR updated, never a second PR. A sync branch
+  with a commit `sync.py` didn't make (a conflict fix, GitHub's "Update branch") is
+  never overwritten: merge or close that PR and delete the branch to sync again. A
+  sync PR closed without merging isn't reopened for the same template commit.
+- It needs gh's token to have the `workflow` scope (a sync usually edits
+  `.github/workflows/`) and stops before writing anything if it doesn't
+  (`gh auth refresh -s workflow`).
+
+Exits 1 if any repo errored or its PR step failed; the other repos still run.
 
 ## GitHub repo config
 
