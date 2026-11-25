@@ -68,6 +68,29 @@ To adopt only one piece, render to a scratch dir and copy the file you want
 from `templates/copier/`. For a non-Python repo `init.py` doesn't cover, see
 `shell-utils` for that shape.
 
+## Syncing template changes (dry run)
+
+```bash
+./sync.py                     # every repo in ~/projects/dev-standards/github-standard.json
+./sync.py my-repo             # one registered repo
+./sync.py --config path/to/github-standard.json
+```
+
+Previews what the current template (dev-standards' `main` HEAD) would change in each
+registered repo. For every repo with a `.copier-answers.yml` on its default branch it
+makes a fresh shallow clone in a temp dir (`gh repo clone`, so private repos work), runs
+`copier update`, and prints the diff. Each repo is reported as `not onboarded` (no
+answers file, skipped), `unchanged`, `clean` (flagged "answers only" when only `_commit`
+moved), `conflicts` (Copier's inline markers are left in the diff) or `error`.
+
+When the repo's Dependabot and the template both bumped the same pin, the conflict is
+resolved to the newer version, but only when the two sides differ in nothing but pins (a
+pre-commit `rev`, or a SHA-pinned `uses:` with its `# vX` comment). Anything else stays
+a conflict. It is a dry run only: it reads `github-standard.json`, clones, and deletes
+the clones; it never creates a branch, pushes or opens a PR. Opening the sync PRs is
+the next step (see [docs/template-sync.md](docs/template-sync.md)). Exits 1 if any repo
+errored.
+
 ## GitHub repo config
 
 ```bash
