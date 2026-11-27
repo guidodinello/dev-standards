@@ -140,6 +140,57 @@ def test_missing_template_files_are_listed_in_the_body(onboarded, fake, config, 
     assert "- `.github/dependabot.yml`" in body.split("### Template files this repo")[1]
 
 
+def test_a_pin_only_sync_pr_gets_auto_merge(onboarded, fake, config, capsys):
+    template, _ = onboarded
+    edit_template(template, CACHE_PIN, CACHE_PIN_C)
+
+    code, out = apply(config("repo"), capsys)
+
+    assert code == 0
+    pr = the_pr(fake)
+    assert pr["auto_merge"] == {"merge_method": "squash"}
+    assert "turned on auto-merge" in pr["body"]
+    assert "(auto-merge on)" in out
+
+
+def test_a_sync_beyond_pins_gets_no_auto_merge(onboarded, fake, config, capsys):
+    template, _ = onboarded
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+
+    apply(config("repo"), capsys)
+
+    pr = the_pr(fake)
+    assert pr["auto_merge"] is None
+    assert "auto-merge" not in pr["body"]
+    assert not any("AutoMerge" in str(c[2]) for c in fake.calls if c[1] == "graphql")
+
+
+def test_auto_merge_is_turned_off_when_a_rerun_is_no_longer_pin_only(
+    onboarded, fake, config, capsys
+):
+    template, _ = onboarded
+    edit_template(template, CACHE_PIN, CACHE_PIN_C)
+    apply(config("repo"), capsys)
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+
+    _, out = apply(config("repo"), capsys)
+
+    assert the_pr(fake)["auto_merge"] is None
+    assert "auto-merge off (no longer pin-only)" in out
+
+
+def test_a_refused_auto_merge_still_opens_the_pr(onboarded, fake, config, capsys):
+    template, _ = onboarded
+    fake.refuse_graphql.add("enablePullRequestAutoMerge")
+    edit_template(template, CACHE_PIN, CACHE_PIN_C)
+
+    code, out = apply(config("repo"), capsys)
+
+    assert code == 0
+    assert the_pr(fake)["auto_merge"] is None
+    assert "auto-merge not enabled: auto-merge is not allowed" in out
+
+
 @pytest.mark.parametrize("template_change", ["none", "answers-only"])
 def test_unchanged_and_answers_only_repos_never_touch_github(
     onboarded, fake, config, capsys, template_change

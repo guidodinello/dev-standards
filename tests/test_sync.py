@@ -301,6 +301,31 @@ def test_a_copier_yml_change_keeps_copiers_conflict(onboarded, tmp_path):
     assert result.status is Status.CONFLICTS
 
 
+def test_a_pin_bump_alone_is_pin_only(onboarded, tmp_path):
+    template, _ = onboarded
+    edit_template(template, CACHE_PIN, CACHE_PIN_C)
+    result = run(tmp_path)
+    assert result.status is Status.CLEAN
+    assert result.pin_only
+    assert "pin bumps only" in sync.describe(result)
+
+
+def test_any_other_change_is_not_pin_only(onboarded, tmp_path):
+    template, _ = onboarded
+    edit_template(template, CACHE_PIN, CACHE_PIN_C)
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)  # a `uvx` version, not a pin
+    result = run(tmp_path)
+    assert result.status is Status.CLEAN
+    assert not result.pin_only
+
+
+def test_a_file_the_template_adds_is_not_pin_only(onboarded, tmp_path):
+    template, _ = onboarded
+    (template / "templates/copier/NEW.md").write_text("new\n")
+    commit_all(template, "add a file")
+    assert not run(tmp_path).pin_only
+
+
 def test_template_files_the_repo_lacks_are_reported_but_not_its_own(onboarded, tmp_path):
     """Copier's update reads a missing template file as deleted on purpose and never
     adds it back; CHANGELOG.md is the repo's own after the first render."""

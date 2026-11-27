@@ -59,6 +59,15 @@ _CREATE_COMMIT = (
     "mutation($input: CreateCommitOnBranchInput!) {"
     " createCommitOnBranch(input: $input) { commit { oid } } }"
 )
+_ENABLE_AUTO_MERGE = (
+    "mutation($id: ID!) {"
+    " enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH})"
+    " { clientMutationId } }"
+)
+_DISABLE_AUTO_MERGE = (
+    "mutation($id: ID!) {"
+    " disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }"
+)
 _MARK_READY = (
     "mutation($id: ID!) {"
     " markPullRequestReadyForReview(input: {pullRequestId: $id}) { clientMutationId } }"
@@ -258,6 +267,12 @@ def pr_body(result: Result) -> str:
                 for pin in result.resolved_pins
             ),
         ]
+    if result.pin_only:
+        lines += [
+            "",
+            "Pin bumps only, so `sync.py` turned on auto-merge: it squash-merges once the "
+            "required checks pass.",
+        ]
     if result.conflicted_files:
         lines += [
             "",
@@ -362,6 +377,27 @@ def _declined(repo_path: str, pulls: list[dict[str, Any]], result: Result) -> st
     return None
 
 
+def reconcile_auto_merge(pr: dict[str, Any], result: Result) -> str:
+    """Auto-merge (squash, still gated on the required checks) for a pin-only sync,
+    off for anything else, including a PR an earlier pin-only run left it on for.
+    Returns a note for the report. A refusal (auto-merge disabled in the repo's
+    settings, say) is reported, not raised: the PR itself is fine."""
+    want = result.pin_only and not result.conflicted_files
+    has = pr.get("auto_merge") is not None
+    if want == has:
+        return "auto-merge on" if has else ""
+    query = _ENABLE_AUTO_MERGE if want else _DISABLE_AUTO_MERGE
+    try:
+        github("POST", "graphql", {"query": query, "variables": {"id": pr["node_id"]}})
+    except GitHubError as e:
+        return f"auto-merge not {'enabled' if want else 'disabled'}: {e.message}"
+    return "auto-merge on" if want else "auto-merge off (no longer pin-only)"
+
+
+def _with_note(url: str, note: str) -> str:
+    return f"{url} ({note})" if note else url
+
+
 def apply_repo(
     org: str, repo: str, result: Result, text: PrText | None = None
 ) -> tuple[Action, str]:
@@ -415,23 +451,28 @@ def apply_repo(
             )
             marked_ready = True
         want_title = CONFLICTS_PREFIX + title if conflicts and not open_pr.get("draft") else title
+        auto_merge = reconcile_auto_merge(open_pr, result)
         if (
             current
             and not marked_ready
             and open_pr["title"] == want_title
             and open_pr.get("body") == body
         ):
-            return Action.SKIPPED, f"already up to date ({open_pr['html_url']})"
+            return (
+                Action.SKIPPED,
+                f"already up to date ({_with_note(open_pr['html_url'], auto_merge)})",
+            )
         github(
             "PATCH",
             f"{repo_path}/pulls/{open_pr['number']}",
             {"title": want_title, "body": body},
         )
-        return Action.UPDATED, open_pr["html_url"]
+        return Action.UPDATED, _with_note(open_pr["html_url"], auto_merge)
 
     new_pr = {"title": title, "head": SYNC_BRANCH, "base": result.base_branch, "body": body}
     if not conflicts:
-        return Action.OPENED, github("POST", f"{repo_path}/pulls", new_pr)["html_url"]
+        pr = github("POST", f"{repo_path}/pulls", new_pr)
+        return Action.OPENED, _with_note(pr["html_url"], reconcile_auto_merge(pr, result))
     try:
         pr = github("POST", f"{repo_path}/pulls", {**new_pr, "draft": True})
         return Action.OPENED_DRAFT, pr["html_url"]
