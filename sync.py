@@ -59,8 +59,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 try:
+    import pathspec
     import yaml
-    from copier import run_update
+    from copier import run_copy, run_update
     from packaging.version import InvalidVersion, Version
 except ImportError:
     sys.exit(
@@ -124,6 +125,9 @@ class Result:
     # Paths whose file mode the API commit can't carry (executable, symlink, mode
     # change): reported by the dry run, refused by --apply.
     unsupported_modes: tuple[str, ...] = ()
+    # Files the template renders for this repo that the repo doesn't have. Copier's
+    # update reads one as deleted on purpose and never adds it back, so it's reported.
+    missing_files: tuple[str, ...] = ()
 
     @property
     def pins_resolved(self) -> int:
@@ -240,13 +244,43 @@ def _git_out(cwd: Path, *args: str) -> str | None:
 
 
 def template_clone(src_path: str, workdir: Path) -> Path | None:
-    """A bare clone of the template, made once per workdir (one sync run)."""
+    """A clone of the template (no checkout: Copier and `git show` read commits), made
+    once per workdir (one sync run). Not bare: Copier copies a bare repo as a plain
+    directory. Not partial (--filter): Copier clones it again, and that fails on the
+    blobs a partial clone lacks."""
     dest = workdir / ".dev-standards-template"
     if not dest.exists():
-        cmd = ["clone", "-q", "--bare", "--filter=blob:none", src_path, str(dest)]
+        cmd = ["clone", "-q", "--no-checkout", src_path, str(dest)]
         if _git_out(workdir, *cmd) is None:
             return None
     return dest
+
+
+def template_settings(template: Path, commit: str) -> dict | None:
+    """The template's copier.yml at `commit`, or None when it can't be read."""
+    copier_yml = _git_out(template, "show", f"{commit}:copier.yml")
+    return None if copier_yml is None else (yaml.safe_load(copier_yml) or {})
+
+
+def missing_template_files(
+    template: Path, commit: str, answers_text: str, dest: Path
+) -> tuple[str, ...]:
+    """What the template at `commit` renders with this repo's answers that the repo
+    doesn't have, except `_skip_if_exists` files (the repo's own after the first
+    render). Rendered into a scratch dir next to the clone."""
+    settings = template_settings(template, commit)
+    if settings is None:
+        raise ValueError(f"can't read copier.yml at template commit {commit}")
+    answers = yaml.safe_load(answers_text) or {}
+    data = {key: value for key, value in answers.items() if not key.startswith("_")}
+    repo_owned = pathspec.PathSpec.from_lines("gitignore", settings.get("_skip_if_exists", []))
+    with tempfile.TemporaryDirectory(dir=dest.parent) as scratch:
+        out = Path(scratch)
+        run_copy(str(template), out, data=data, vcs_ref=commit, defaults=True, quiet=True)
+        rendered = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
+    return tuple(
+        rel for rel in rendered if not (dest / rel).exists() and not repo_owned.match_file(rel)
+    )
 
 
 def resolve_pin_only_file(
@@ -258,11 +292,10 @@ def resolve_pin_only_file(
     of them can't be read."""
     if _git_out(template, "diff", "--quiet", old_commit, new_commit, "--", "copier.yml") is None:
         return None
-    copier_yml = _git_out(template, "show", f"{new_commit}:copier.yml")
+    settings = template_settings(template, new_commit)
     repo_text = _git_out(dest, "show", f"HEAD:{rel}")
-    if copier_yml is None or repo_text is None:
+    if settings is None or repo_text is None:
         return None
-    settings = yaml.safe_load(copier_yml) or {}
     subdir = settings.get("_subdirectory", "").strip("/")
     prefix = f"{subdir}/" if subdir else ""
     for name in (rel, rel + settings.get("_templates_suffix", ".jinja")):
@@ -372,7 +405,7 @@ def update_clone(repo: str, dest: Path) -> Result:
     unmerged = _run(["git", "diff", "--name-only", "--diff-filter=U"], cwd=dest).split()
     old_commit = _answer(old_answers, "_commit")
     new_commit = _answer((dest / ANSWERS_FILE).read_text(), "_commit")
-    template = template_clone(_answer(old_answers, "_src_path"), dest.parent) if unmerged else None
+    template = template_clone(_answer(old_answers, "_src_path"), dest.parent)
     resolved_pins = []
     conflicted = []
     for rel in unmerged:
@@ -395,6 +428,11 @@ def update_clone(repo: str, dest: Path) -> Result:
     changed = _run(["git", "diff", "--cached", "--name-only", "HEAD"], cwd=dest).split()
     changes, unsupported_modes = _staged_changes(dest)
     new_answers = (dest / ANSWERS_FILE).read_text()
+    missing = (
+        missing_template_files(template, new_commit, new_answers, dest)
+        if template is not None
+        else ()
+    )
 
     if conflicted:
         status = Status.CONFLICTS
@@ -416,6 +454,7 @@ def update_clone(repo: str, dest: Path) -> Result:
         template_url=_answer(new_answers, "_src_path"),
         changes=changes,
         unsupported_modes=unsupported_modes,
+        missing_files=missing,
     )
 
 
@@ -474,6 +513,11 @@ def describe(result: Result) -> str:
         notes.append(
             "file mode the API commit can't carry (--apply refuses this repo): "
             + ", ".join(result.unsupported_modes)
+        )
+    if result.missing_files:
+        notes.append(
+            "template files missing (a sync never adds them back): "
+            + ", ".join(result.missing_files)
         )
     if result.message:
         notes.append(result.message)

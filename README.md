@@ -92,7 +92,9 @@ resolved to the newer version, but only when the two sides differ in nothing but
 pre-commit `rev`, or a SHA-pinned `uses:` with its `# vX` comment). When the template
 changed nothing but pins in a conflicted file since the repo's last sync, the file is the
 repo's own with those pins bumped, however Copier's merge aligned it. Anything else stays
-a conflict. Without `--apply` it is a dry run: it reads `github-standard.json`, clones,
+a conflict. Each repo also lists the template files it doesn't have (except
+`_skip_if_exists` ones like `CHANGELOG.md`): Copier reads a missing file as deleted on
+purpose and never adds it back, so a file lost at adoption stays lost unless reported. Without `--apply` it is a dry run: it reads `github-standard.json`, clones,
 and deletes the clones; it never creates a branch, pushes or opens a PR.
 
 `--apply` opens one PR per repo with a real change, titled `chore(dev-standards): sync
