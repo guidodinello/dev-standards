@@ -224,6 +224,15 @@ class FakeGitHub:
                 del self.fail_once[(fail_method, suffix)]
                 raise error
         if path == "graphql":
+            if "markPullRequestReadyForReview" in payload["query"]:
+                pr = next(
+                    pr
+                    for pulls in self.pulls.values()
+                    for pr in pulls
+                    if pr["node_id"] == payload["variables"]["id"]
+                )
+                pr["draft"] = False
+                return {"data": {"markPullRequestReadyForReview": {"clientMutationId": None}}}
             return self._create_commit(payload["variables"]["input"])
         _org, repo, rest = re.fullmatch(r"repos/([^/]+)/([^/]+)/(.+)", path).groups()
         if method == "GET" and rest.startswith("pulls?"):
@@ -259,6 +268,7 @@ class FakeGitHub:
             pulls = self.pulls.setdefault(repo, [])
             pr = {
                 "number": len(pulls) + 1,
+                "node_id": f"PR_{repo}_{len(pulls) + 1}",
                 "state": "open",
                 "merged_at": None,
                 "draft": bool(payload.get("draft")),

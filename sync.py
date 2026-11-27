@@ -21,8 +21,10 @@ from to dev-standards' main HEAD), then resolves pin-only conflicts and reports:
 Pin conflicts (decided in docs/template-sync.md): when the repo's Dependabot and
 the template both bumped the same pin, the conflict hunk is resolved to the newer
 version, but only when the two sides differ in nothing but pins (a pre-commit
-`rev`, or a SHA-pinned `uses:` with its `# vX` comment). Anything else, or a
-version it can't compare, stays a conflict.
+`rev`, or a SHA-pinned `uses:` with its `# vX` comment). First, when the template
+changed nothing but pins in a conflicted file, the file is the repo's own with
+those pins bumped (`bump_template_pins`). Anything else, or a version it can't
+compare, stays a conflict.
 
 --apply skips `unchanged` and "answers only" repos (no PR for a `_commit` that
 moved without changing any file) and opens a draft for `conflicts`. A file mode the
@@ -57,6 +59,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 try:
+    import yaml
     from copier import run_update
     from packaging.version import InvalidVersion, Version
 except ImportError:
@@ -180,6 +183,96 @@ def merge_pin_only_hunk(
     return merged.removeprefix(context), pins
 
 
+def _all_pins(text: str, pattern: re.Pattern) -> dict[str, set[str]]:
+    """Every distinct pin per name. extract_pins keeps only the last one, which hides
+    a file that pins the same action at two different versions."""
+    pins: dict[str, set[str]] = {}
+    for m in pattern.finditer(text):
+        pins.setdefault(m.group(2), set()).add(m.group(3))
+    return pins
+
+
+def bump_template_pins(
+    repo_text: str, old_template: str, new_template: str
+) -> tuple[str, list[tuple[str, str, str, str]]] | None:
+    """The repo's file with the template's pin bumps applied, when the template
+    changed nothing but pins between the two commits; None to keep Copier's merge.
+
+    Copier's 3-way text merge misaligns a repo that moved or reshaped template blocks
+    (a job kept elsewhere, an extra `setup-uv` step in a job of its own): a one-line
+    pin bump then lands in a conflict with a whole job. When the template's change is
+    pin-only, the exact merge is the repo's file plus those pins, so take that.
+    Only the names the template bumped move, each to the newer version. Fails closed
+    (None): a template change beyond pins, a name pinned at two versions in the
+    template or the repo, or a version it can't compare. A name the repo no longer
+    pins is skipped."""
+    if sync_pins(old_template, new_template) != old_template:
+        return None
+    merged = repo_text
+    pins = []
+    for pattern in (PRE_COMMIT_REV, ACTION_USES):
+        old_pins, new_pins = _all_pins(old_template, pattern), _all_pins(new_template, pattern)
+        repo_pins = _all_pins(repo_text, pattern)
+        winners = {}
+        for key in sorted(new_pins):
+            if new_pins[key] == old_pins.get(key):
+                continue
+            if len(new_pins[key]) != 1 or len(repo_pins.get(key, ())) > 1:
+                return None
+            if key not in repo_pins:
+                continue
+            (theirs,), (ours,) = new_pins[key], repo_pins[key]
+            if ours == theirs:
+                continue
+            our_version, their_version = pin_version(ours), pin_version(theirs)
+            if our_version is None or their_version is None or our_version == their_version:
+                return None
+            winners[key] = theirs if their_version > our_version else ours
+            pins.append((key, ours, theirs, winners[key]))
+        merged = apply_pins(merged, pattern, winners)
+    return merged, pins
+
+
+def _git_out(cwd: Path, *args: str) -> str | None:
+    """A git command's stdout, or None when it fails (callers fail closed)."""
+    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def template_clone(src_path: str, workdir: Path) -> Path | None:
+    """A bare clone of the template, made once per workdir (one sync run)."""
+    dest = workdir / ".dev-standards-template"
+    if not dest.exists():
+        cmd = ["clone", "-q", "--bare", "--filter=blob:none", src_path, str(dest)]
+        if _git_out(workdir, *cmd) is None:
+            return None
+    return dest
+
+
+def resolve_pin_only_file(
+    template: Path, old_commit: str, new_commit: str, dest: Path, rel: str
+) -> tuple[str, list[tuple[str, str, str, str]]] | None:
+    """bump_template_pins for one conflicted file: the repo's committed version and
+    the template source (`rel` or `rel.jinja`) at both commits. None when copier.yml
+    changed in between (questions or settings can change what renders) or any
+    of them can't be read."""
+    if _git_out(template, "diff", "--quiet", old_commit, new_commit, "--", "copier.yml") is None:
+        return None
+    copier_yml = _git_out(template, "show", f"{new_commit}:copier.yml")
+    repo_text = _git_out(dest, "show", f"HEAD:{rel}")
+    if copier_yml is None or repo_text is None:
+        return None
+    settings = yaml.safe_load(copier_yml) or {}
+    subdir = settings.get("_subdirectory", "").strip("/")
+    prefix = f"{subdir}/" if subdir else ""
+    for name in (rel, rel + settings.get("_templates_suffix", ".jinja")):
+        old = _git_out(template, "show", f"{old_commit}:{prefix}{name}")
+        new = _git_out(template, "show", f"{new_commit}:{prefix}{name}")
+        if old is not None and new is not None:
+            return bump_template_pins(repo_text, old, new)
+    return None
+
+
 def _find(lines: list[str], start: int, marker: str) -> int | None:
     return next((j for j in range(start, len(lines)) if lines[j].rstrip("\n") == marker), None)
 
@@ -277,11 +370,22 @@ def update_clone(repo: str, dest: Path) -> Result:
         vcs_ref="HEAD",
     )
     unmerged = _run(["git", "diff", "--name-only", "--diff-filter=U"], cwd=dest).split()
+    old_commit = _answer(old_answers, "_commit")
+    new_commit = _answer((dest / ANSWERS_FILE).read_text(), "_commit")
+    template = template_clone(_answer(old_answers, "_src_path"), dest.parent) if unmerged else None
     resolved_pins = []
     conflicted = []
     for rel in unmerged:
         path = dest / rel
-        text, resolved, left = resolve_pin_conflicts(path.read_text())
+        whole_file = (
+            resolve_pin_only_file(template, old_commit, new_commit, dest, rel)
+            if template is not None
+            else None
+        )
+        if whole_file is not None:
+            text, resolved, left = *whole_file, 0
+        else:
+            text, resolved, left = resolve_pin_conflicts(path.read_text())
         path.write_text(text)
         resolved_pins += [ResolvedPin(rel, *pin) for pin in resolved]
         if left:
