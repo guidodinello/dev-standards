@@ -301,6 +301,22 @@ def test_a_copier_yml_change_keeps_copiers_conflict(onboarded, tmp_path):
     assert result.status is Status.CONFLICTS
 
 
+def test_template_files_the_repo_lacks_are_reported_but_not_its_own(onboarded, tmp_path):
+    """Copier's update reads a missing template file as deleted on purpose and never
+    adds it back; CHANGELOG.md is the repo's own after the first render."""
+    _, origin = onboarded
+    git(origin, "rm", "-q", ".github/dependabot.yml", "CHANGELOG.md")
+    commit_all(origin, "drop files")
+    result = run(tmp_path)
+    assert result.status is Status.UNCHANGED
+    assert result.missing_files == (".github/dependabot.yml",)
+    assert "template files missing" in sync.describe(result)
+
+
+def test_a_repo_with_every_template_file_reports_none_missing(onboarded, tmp_path):
+    assert run(tmp_path).missing_files == ()
+
+
 # ── bump_template_pins ──────────────────────────────────────────────────────
 
 CHECKOUT_7 = "actions/checkout@" + "a" * 40 + " # v7"

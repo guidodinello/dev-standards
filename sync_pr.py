@@ -269,6 +269,15 @@ def pr_body(result: Result) -> str:
             "Resolve them on this branch; CI (pre-commit's `check-merge-conflict`) fails "
             "while the markers remain.",
         ]
+    if result.missing_files:
+        lines += [
+            "",
+            "### Template files this repo doesn't have",
+            "The template renders these for this repo, but they're missing. A sync never "
+            "adds them back (Copier reads a missing file as deleted on purpose): add them "
+            "by hand, or skip them on purpose.",
+            *(f"- `{path}`" for path in result.missing_files),
+        ]
     lines += [
         "",
         "---",

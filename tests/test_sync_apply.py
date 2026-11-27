@@ -128,6 +128,18 @@ def test_resolved_pins_are_listed_in_the_body(onboarded, fake, config, capsys):
     assert f"→ kept `{kept}`" in body
 
 
+def test_missing_template_files_are_listed_in_the_body(onboarded, fake, config, capsys):
+    template, origin = onboarded
+    git(origin, "rm", "-q", ".github/dependabot.yml")
+    commit_all(origin, "drop dependabot")
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+
+    apply(config("repo"), capsys)
+
+    body = the_pr(fake)["body"]
+    assert "- `.github/dependabot.yml`" in body.split("### Template files this repo")[1]
+
+
 @pytest.mark.parametrize("template_change", ["none", "answers-only"])
 def test_unchanged_and_answers_only_repos_never_touch_github(
     onboarded, fake, config, capsys, template_change
