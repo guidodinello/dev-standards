@@ -27,7 +27,8 @@ those pins bumped (`bump_template_pins`). Anything else, or a version it can't
 compare, stays a conflict.
 
 --apply skips `unchanged` and "answers only" repos (no PR for a `_commit` that
-moved without changing any file) and opens a draft for `conflicts`. A file mode the
+moved without changing any file), turns on auto-merge for a pin-bumps-only sync,
+and opens a draft for `conflicts`. A file mode the
 API commit can't carry (executable, symlink) is reported here and refused by --apply.
 
 Usage:
@@ -112,6 +113,9 @@ class Result:
     status: Status
     diff: str = ""
     answers_only: bool = False
+    # Every changed file differs only in pins (a pre-commit `rev`, a SHA-pinned
+    # `uses:`), and the answers file only in `_commit`: --apply auto-merges it.
+    pin_only: bool = False
     resolved_pins: tuple[ResolvedPin, ...] = ()
     conflicted_files: tuple[str, ...] = field(default_factory=tuple)
     message: str = ""
@@ -445,6 +449,7 @@ def update_clone(repo: str, dest: Path) -> Result:
         status,
         diff=diff,
         answers_only=changed == [ANSWERS_FILE] and _only_commit_changed(diff),
+        pin_only=status is Status.CLEAN and _pin_only(dest, changed),
         resolved_pins=tuple(resolved_pins),
         conflicted_files=tuple(conflicted),
         base_branch=base_branch,
@@ -489,6 +494,27 @@ def _staged_changes(
     return tuple(changes), tuple(unsupported)
 
 
+def _pin_only(dest: Path, changed: list[str]) -> bool:
+    """Whether the staged change is nothing but pin bumps, plus `_commit` in the
+    answers file. Fails closed: an added or deleted file, or one it can't read,
+    is not pin-only."""
+    for rel in changed:
+        old = _git_out(dest, "show", f"HEAD:{rel}")
+        new = _git_out(dest, "show", f":{rel}")
+        if old is None or new is None:
+            return False
+        if rel == ANSWERS_FILE:
+            if _without_commit(old) != _without_commit(new):
+                return False
+        elif sync_pins(old, new) != old:
+            return False
+    return bool(changed)
+
+
+def _without_commit(answers_text: str) -> list[str]:
+    return [line for line in answers_text.splitlines() if not line.startswith("_commit:")]
+
+
 def _only_commit_changed(diff: str) -> bool:
     changes = [
         line
@@ -505,6 +531,8 @@ def describe(result: Result) -> str:
     notes = []
     if result.answers_only:
         notes.append("answers only")
+    elif result.pin_only:
+        notes.append("pin bumps only (--apply auto-merges)")
     if result.pins_resolved:
         notes.append(f"{result.pins_resolved} pin conflict(s) auto-resolved to the newer version")
     if result.conflicted_files:

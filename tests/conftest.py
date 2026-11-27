@@ -185,6 +185,10 @@ class FakeGitHub:
         self.drafts_supported = True
         self.fail_commit_for: set[str] = set()
         self.fail_once: dict[tuple[str, str], GitHubError] = {}  # (method, path suffix)
+        self.refuse_graphql: set[str] = set()  # mutation names GitHub refuses
+
+    def _pr_by_node(self, node_id: str) -> dict:
+        return next(pr for pulls in self.pulls.values() for pr in pulls if pr["node_id"] == node_id)
 
     @property
     def writes(self) -> list[tuple[str, str, dict | None]]:
@@ -224,6 +228,16 @@ class FakeGitHub:
                 del self.fail_once[(fail_method, suffix)]
                 raise error
         if path == "graphql":
+            for mutation, value in (
+                ("enablePullRequestAutoMerge", {"merge_method": "squash"}),
+                ("disablePullRequestAutoMerge", None),
+            ):
+                if mutation in payload["query"]:
+                    if mutation in self.refuse_graphql:
+                        raise GitHubError(None, "auto-merge is not allowed for this repository")
+                    pr = self._pr_by_node(payload["variables"]["id"])
+                    pr["auto_merge"] = value
+                    return {"data": {mutation: {"clientMutationId": None}}}
             if "markPullRequestReadyForReview" in payload["query"]:
                 pr = next(
                     pr
@@ -272,6 +286,7 @@ class FakeGitHub:
                 "state": "open",
                 "merged_at": None,
                 "draft": bool(payload.get("draft")),
+                "auto_merge": None,
                 "title": payload["title"],
                 "body": payload["body"],
                 "base": {"ref": payload["base"]},

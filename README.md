@@ -105,6 +105,11 @@ default branch:
   it and rulesets that require signed commits accept it. The PR body links the
   template range, lists the changed files and any pins resolved, and links issue #53.
 - `unchanged` and "answers only" repos get no PR.
+- A sync whose every change is a pin bump (a pre-commit `rev`, a SHA-pinned `uses:`;
+  plus `_commit`) gets auto-merge (squash), so it lands once the required checks
+  pass. Anything else waits for a human, and a rerun that is no longer pin-only turns
+  auto-merge back off. A repo that refuses auto-merge still gets its PR; the refusal
+  is printed.
 - `conflicts` get a draft PR listing the conflicted files. If GitHub refuses the
   draft (draft availability on private repos has depended on the plan), a normal PR
   titled `[conflicts] ...` that says not to merge. Either way CI stays red while a
