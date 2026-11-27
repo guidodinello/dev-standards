@@ -86,6 +86,19 @@ not built yet (decision 2).
    as a draft. If GitHub refuses the draft, it is a normal PR titled
    `[conflicts] ...` that says not to merge. The rendered pre-commit config's
    `check-merge-conflict` hook keeps CI red while a marker remains in any file.
+
+   Extended (2026-11-27), file level, tried first (`bump_template_pins`). A repo
+   that moved or reshaped template blocks (its own job with a `setup-uv` step, the
+   `audit-workflows` job kept elsewhere) makes Copier's text merge misalign: after
+   the 2026-11-27 sync, dev-standards#62's one-line `setup-uv` bump conflicted with
+   whole jobs in 11 repos. When the template source of a conflicted file changed
+   only in pins between the repo's `_commit` and the new one, that diff is exact, so
+   the file becomes the repo's committed version with just the bumped pins applied
+   (newer wins, as above). It fails closed (falls back to the hunk rule) when
+   `copier.yml` changed in the range, the template changed anything but pins, a
+   name is pinned at two versions in the template or the repo, or a version can't
+   be compared. A name the repo no longer pins is left alone. A sync PR opened as a
+   draft whose rerun comes out clean is marked ready for review.
 2. **Onboarding existing repos.** Decided (2026-11-25). Write `.copier-answers.yml` from `init.py`'s
    detection. Set `_commit` to the dev-standards commit whose render differs
    least from the repo's current files. Commit only that file, then run a normal

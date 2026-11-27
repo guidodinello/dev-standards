@@ -59,6 +59,10 @@ _CREATE_COMMIT = (
     "mutation($input: CreateCommitOnBranchInput!) {"
     " createCommitOnBranch(input: $input) { commit { oid } } }"
 )
+_MARK_READY = (
+    "mutation($id: ID!) {"
+    " markPullRequestReadyForReview(input: {pullRequestId: $id}) { clientMutationId } }"
+)
 
 
 class GitHubError(Exception):
@@ -393,8 +397,21 @@ def apply_repo(
     conflicts = bool(result.conflicted_files)
 
     if open_pr is not None:
+        marked_ready = False
+        if not conflicts and open_pr.get("draft"):
+            # A draft from an earlier run's conflicts, now resolved. REST can't
+            # change `draft`; this mutation is the only way to undraft a PR.
+            github(
+                "POST", "graphql", {"query": _MARK_READY, "variables": {"id": open_pr["node_id"]}}
+            )
+            marked_ready = True
         want_title = CONFLICTS_PREFIX + title if conflicts and not open_pr.get("draft") else title
-        if current and open_pr["title"] == want_title and open_pr.get("body") == body:
+        if (
+            current
+            and not marked_ready
+            and open_pr["title"] == want_title
+            and open_pr.get("body") == body
+        ):
             return Action.SKIPPED, f"already up to date ({open_pr['html_url']})"
         github(
             "PATCH",

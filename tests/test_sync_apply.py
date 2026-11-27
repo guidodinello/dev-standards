@@ -177,6 +177,26 @@ def test_rerun_after_the_template_moved_updates_the_same_pr(onboarded, fake, con
     assert CACHE_PIN_C in commit["files"][str(CI)] and ZIZMOR_NEXT in commit["files"][str(CI)]
 
 
+@pytest.mark.parametrize("drafts_supported", [True, False])
+def test_a_conflicts_pr_whose_rerun_is_clean_becomes_a_normal_pr(
+    onboarded, fake, config, capsys, drafts_supported
+):
+    template, origin = onboarded
+    fake.drafts_supported = drafts_supported
+    edit(origin, CI, "--format=github .github", "--format=plain .github", "local edit")
+    edit_template(template, ZIZMOR, ZIZMOR_NEXT)
+    apply(config("repo"), capsys)
+    edit(origin, CI, "--format=plain .github", "--format=github .github", "edit reverted")
+
+    _, out = apply(config("repo"), capsys)
+
+    pr = the_pr(fake)
+    assert not pr["draft"]
+    assert not pr["title"].startswith("[conflicts]")
+    assert "### Conflicts" not in pr["body"]
+    assert "apply: updated PR" in out
+
+
 def test_a_human_commit_on_the_sync_branch_is_never_overwritten(onboarded, fake, config, capsys):
     template, _ = onboarded
     edit_template(template, ZIZMOR, ZIZMOR_NEXT)

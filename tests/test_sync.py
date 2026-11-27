@@ -260,6 +260,117 @@ def test_main_rejects_an_unregistered_repo(tmp_path):
     assert sync.main(["other", "--config", str(config)]) == 1
 
 
+CACHE_COMMENT = (
+    "        # Persistent homelab runners keep ~/.cache/pre-commit on disk; restoring or\n"
+)
+
+
+def test_a_pin_only_template_change_keeps_the_repo_file_around_it(onboarded, tmp_path):
+    """The repo edited the line next to a pin the template bumped: Copier's merge
+    conflicts on the hunk, but the template changed nothing but that pin."""
+    template, origin = onboarded
+    edit(origin, CI, CACHE_COMMENT, "        # our own comment\n", "local edit")
+    edit_template(template, CACHE_PIN, CACHE_PIN_C)
+    result = run(tmp_path)
+    assert result.status is Status.CLEAN
+    old, new = CACHE_PIN.split("@")[1], CACHE_PIN_C.split("@")[1]
+    assert result.resolved_pins == (sync.ResolvedPin(str(CI), "actions/cache", old, new, new),)
+    assert f"-      - uses: {CACHE_PIN}" in result.diff
+    assert f"+      - uses: {CACHE_PIN_C}" in result.diff
+    assert "-        # our own comment" not in result.diff  # the repo's edit stays
+    assert "<<<<<<<" not in result.diff
+
+
+def test_a_template_change_beyond_pins_keeps_copiers_conflict(onboarded, tmp_path):
+    template, origin = onboarded
+    edit(origin, CI, CACHE_COMMENT, "        # our own comment\n", "local edit")
+    edit_template(template, CACHE_PIN, CACHE_PIN_C)
+    edit_template(template, CACHE_COMMENT, "        # the template's comment\n")
+    result = run(tmp_path)
+    assert result.status is Status.CONFLICTS
+    assert result.conflicted_files == (str(CI),)
+
+
+def test_a_copier_yml_change_keeps_copiers_conflict(onboarded, tmp_path):
+    """copier.yml's questions and settings can change what renders: fail closed."""
+    template, origin = onboarded
+    edit(origin, CI, CACHE_COMMENT, "        # our own comment\n", "local edit")
+    edit_template(template, CACHE_PIN, CACHE_PIN_C)
+    edit(template, "copier.yml", "# Copier template", "# The Copier template", "comment")
+    result = run(tmp_path)
+    assert result.status is Status.CONFLICTS
+
+
+# ── bump_template_pins ──────────────────────────────────────────────────────
+
+CHECKOUT_7 = "actions/checkout@" + "a" * 40 + " # v7"
+CHECKOUT_8 = "actions/checkout@" + "e" * 40 + " # v8"
+
+
+def uses(*pins: str) -> str:
+    return "".join(f"      - uses: {pin}\n" for pin in pins)
+
+
+def test_bumps_every_occurrence_the_repo_has_wherever_it_moved_it():
+    repo = "jobs:\n  mine:\n" + uses(CACHE_PIN_B) + "  extra:\n" + uses(CACHE_PIN_B)
+    merged, pins = sync.bump_template_pins(repo, uses(CACHE_PIN_B), uses(CACHE_PIN_C))
+    assert merged == repo.replace(CACHE_PIN_B, CACHE_PIN_C)
+    old, new = CACHE_PIN_B.split("@")[1], CACHE_PIN_C.split("@")[1]
+    assert pins == [
+        ("actions/cache", old, new, new),
+    ]
+
+
+def test_keeps_a_repo_pin_newer_than_the_template():
+    repo = uses(CACHE_PIN_C)
+    merged, _ = sync.bump_template_pins(repo, uses(CACHE_PIN), uses(CACHE_PIN_B))
+    assert merged == repo
+
+
+def test_moves_only_the_names_the_template_bumped():
+    """The repo's other pins differ from the template's too; they're not this sync's."""
+    repo = uses(CHECKOUT_8, CACHE_PIN_B)
+    merged, _ = sync.bump_template_pins(
+        repo, uses(CHECKOUT_7, CACHE_PIN_B), uses(CHECKOUT_7, CACHE_PIN_C)
+    )
+    assert merged == uses(CHECKOUT_8, CACHE_PIN_C)
+
+
+def test_a_name_the_repo_no_longer_pins_is_skipped():
+    merged, pins = sync.bump_template_pins(uses(CHECKOUT_7), uses(CACHE_PIN_B), uses(CACHE_PIN_C))
+    assert (merged, pins) == (uses(CHECKOUT_7), [])
+
+
+@pytest.mark.parametrize(
+    ("repo", "old", "new"),
+    [
+        pytest.param(
+            uses(CACHE_PIN_B), uses(CACHE_PIN_B), uses(CACHE_PIN_C) + "# new\n", id="non-pin-change"
+        ),
+        pytest.param(
+            uses(CACHE_PIN_B, CACHE_PIN),
+            uses(CACHE_PIN_B),
+            uses(CACHE_PIN_C),
+            id="repo-two-versions",
+        ),
+        pytest.param(
+            uses(CACHE_PIN_B),
+            uses(CACHE_PIN_B, CACHE_PIN_B),
+            uses(CACHE_PIN_C, CACHE_PIN_B),
+            id="template-two-versions",
+        ),
+        pytest.param(
+            uses("actions/cache@main"),
+            uses(CACHE_PIN_B),
+            uses(CACHE_PIN_C),
+            id="unparseable-version",
+        ),
+    ],
+)
+def test_fails_closed(repo, old, new):
+    assert sync.bump_template_pins(repo, old, new) is None
+
+
 # ── resolve_pin_conflicts ───────────────────────────────────────────────────
 
 

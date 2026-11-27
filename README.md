@@ -89,7 +89,9 @@ moved), `conflicts` (Copier's inline markers are left in the diff) or `error`.
 
 When the repo's Dependabot and the template both bumped the same pin, the conflict is
 resolved to the newer version, but only when the two sides differ in nothing but pins (a
-pre-commit `rev`, or a SHA-pinned `uses:` with its `# vX` comment). Anything else stays
+pre-commit `rev`, or a SHA-pinned `uses:` with its `# vX` comment). When the template
+changed nothing but pins in a conflicted file since the repo's last sync, the file is the
+repo's own with those pins bumped, however Copier's merge aligned it. Anything else stays
 a conflict. Without `--apply` it is a dry run: it reads `github-standard.json`, clones,
 and deletes the clones; it never creates a branch, pushes or opens a PR.
 
